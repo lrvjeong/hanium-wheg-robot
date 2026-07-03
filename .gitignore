@@ -1,0 +1,10 @@
+# Python 캐시 파일 무시
+__pycache__/
+*.pyc
+
+# 텍스트 에디터(VSCode 등) 설정 파일 무시
+.vscode/
+
+# 혹시 모를 임시 파일들 무시
+*.swp
+*~

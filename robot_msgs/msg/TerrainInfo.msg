@@ -1,0 +1,4 @@
+float32 step_height
+float32 distance_to_step
+float32 slope_deg
+bool step_detected
