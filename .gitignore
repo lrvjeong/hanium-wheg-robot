@@ -1,8 +1,5 @@
-**/__pycache__/
-**/*.pyc
-**/.pytest_cache/
-**/build/
-**/install/
-**/log/
-.vscode/
-.DS_Store
+build/
+install/
+log/
+*.pyc
+__pycache__/
