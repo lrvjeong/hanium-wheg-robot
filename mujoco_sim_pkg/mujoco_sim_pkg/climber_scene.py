@@ -23,21 +23,33 @@ import math
 # ============================================================
 # --- 계단 ---
 N_STEPS   = 5       # 단수
-STEP_H    = 0.13    # 단높이 [m]  (한국 계단 보통 0.15~0.18, 처음엔 낮게)
+STEP_H    = 0.10    # 단높이 [m] — 목표 성능: 10cm 단차 극복
 STEP_D    = 0.30    # 단깊이 [m]
 STEP_W    = 1.6     # 계단 폭 [m]
 STAIR_X0  = 1.10    # 로봇 시작점에서 첫 단까지 거리 [m]
 
+# --- 3D LiDAR (CygLiDAR 등 소형 3D ToF 모듈 근사) ---
+LIDAR_ROWS       = 5     # 세로 방향 광선 수
+LIDAR_COLS       = 5     # 가로 방향 광선 수
+LIDAR_FOV_H      = math.radians(60)   # 수평 화각
+LIDAR_FOV_V      = math.radians(45)   # 수직 화각
+LIDAR_MOUNT_TILT = math.radians(25)   # 정면 기준 아래로 기울인 각도 (계단 인식용)
+LIDAR_MIN_RANGE  = 0.05   # 실제 부품 최소 인식거리 50mm — 이보다 가까우면 판독 불가로 처리
+LIDAR_MAX_RANGE  = 2.5    # 최대 인식거리 [m] (부품 스펙에 맞춰 조정하세요)
+
 # --- 바퀴 / 스포크 ---
-HUB_R      = 0.080  # 바퀴 허브 반지름 [m]
-ARC_R      = 0.088  # 스포크 호의 반지름 (오므렸을 때 림이 되는 원)
+HUB_R      = 0.095  # 바퀴 허브 반지름 [m] (기존 0.080 → 확대)
+HUB_HALF_T = 0.022  # 허브 원판 반두께 [m] (기존 0.014 → 더 두껍고 존재감 있게)
+ARC_R      = 0.105  # 스포크 호의 반지름 (오므렸을 때 림이 되는 원, 허브와 함께 확대)
 ARC_SPAN   = math.radians(95)   # 스포크 호가 덮는 각도
-SPOKE_RAD  = 0.009  # 스포크 캡슐 굵기 [m]
+ARC_SEGMENTS = 5    # 호를 근사하는 캡슐 개수 (기존 2 → 부드러운 곡선을 위해 증가)
+SPOKE_RAD_BASE = 0.013  # 훅 밑동(허브 쪽) 굵기 [m] — 더 두껍게
+SPOKE_RAD_TIP  = 0.006  # 훅 끝(발톱 쪽) 굵기 [m] — 가늘게 테이퍼
 ARC_DIR    = +1     # 훅이 감기는 방향. 등반 시 갈고리가 계단에 안 걸리면 -1로!
 DEPLOY_MAX = 1.85   # 스포크 전개 각도 [rad] (~106도)
-WHEEL_X    = 0.08   # 차체 기준 바퀴 축 위치 (앞쪽 +x)
-WHEEL_Y    = 0.130  # 차체 중심에서 바퀴까지 좌우 거리
-SPOKE_YOFF = 0.026  # 스포크를 허브 바깥면 쪽으로 빼는 오프셋
+WHEEL_X    = 0.09   # 차체 기준 바퀴 축 위치 (앞쪽 +x, 허브가 커진 만큼 소폭 조정)
+WHEEL_Y    = 0.145  # 차체 중심에서 바퀴까지 좌우 거리 (허브 확대에 맞춰 조정)
+SPOKE_YOFF = 0.030  # 스포크를 허브 바깥면 쪽으로 빼는 오프셋 (허브 두께에 맞춰 조정)
 
 # --- 차체 / 구동 ---
 CHASSIS_HALF = (0.14, 0.09, 0.035)  # 차체 박스 절반 치수 (x, y, z)
@@ -51,30 +63,43 @@ def _f(*vals):
 
 
 def _spoke_body(prefix: str, k: int, y_off: float) -> str:
-    """스포크 1개(호를 캡슐 2개로 근사)를 XML로 생성.
+    """스포크 1개(호를 캡슐 ARC_SEGMENTS개로 근사)를 XML로 생성.
 
     피벗은 허브 림 위 (반지름 HUB_R, 각도 phi)에 있고,
     스포크 조인트가 0이면 호가 림을 따라 눕고(오므림),
     DEPLOY_MAX가 되면 바깥으로 펴져 갈고리가 됩니다.
+
+    v2: 세그먼트를 늘려 각진 2-캡슐 근사 대신 부드러운 곡선을 만들고,
+    밑동(SPOKE_RAD_BASE)에서 끝(SPOKE_RAD_TIP)으로 갈수록 가늘어지는
+    테이퍼를 줘서 더 유기적인 갈고리/발톱 느낌을 냅니다.
     """
     phi = 2.0 * math.pi * k / 3.0
     px, pz = HUB_R * math.cos(phi), HUB_R * math.sin(phi)
 
-    # 호 위의 3점 (시작 / 중간 / 끝) — 피벗 기준 로컬 좌표
-    angs = [phi, phi + ARC_DIR * ARC_SPAN / 2.0, phi + ARC_DIR * ARC_SPAN]
+    # 호 위의 (ARC_SEGMENTS+1)개 점 — 피벗 기준 로컬 좌표
+    n = ARC_SEGMENTS
+    angs = [phi + ARC_DIR * ARC_SPAN * (i / n) for i in range(n + 1)]
     pts = [(ARC_R * math.cos(a) - px, ARC_R * math.sin(a) - pz) for a in angs]
 
     # ARC_DIR에 따라 '양수 조인트각 = 전개'가 되도록 축 부호를 맞춤
     axis = f"0 {ARC_DIR} 0"
     name = f"spoke_{prefix}{k}"
-    cap1 = f'fromto="{_f(pts[0][0], y_off, pts[0][1])} {_f(pts[1][0], y_off, pts[1][1])}"'
-    cap2 = f'fromto="{_f(pts[1][0], y_off, pts[1][1])} {_f(pts[2][0], y_off, pts[2][1])}"'
+
+    geoms = []
+    for i in range(n):
+        a, b = pts[i], pts[i + 1]
+        # 세그먼트 중간 지점 반지름을 선형 보간해 테이퍼 형성
+        t_mid = (i + 0.5) / n
+        r = SPOKE_RAD_BASE + (SPOKE_RAD_TIP - SPOKE_RAD_BASE) * t_mid
+        fromto = f'fromto="{_f(a[0], y_off, a[1])} {_f(b[0], y_off, b[1])}"'
+        geoms.append(f'<geom class="spoke" size="{r:.4f}" {fromto}/>')
+    geoms_xml = "\n          ".join(geoms)
+
     return f"""
         <body name="{name}" pos="{_f(px, 0, pz)}">
           <joint name="{name}" type="hinge" axis="{axis}" range="0 {DEPLOY_MAX}"
                  damping="0.4" armature="0.001"/>
-          <geom class="spoke" {cap1}/>
-          <geom class="spoke" {cap2}/>
+          {geoms_xml}
         </body>"""
 
 
@@ -86,7 +111,7 @@ def _wheel(prefix: str, side: int) -> str:
       <body name="wheel_{prefix}" pos="{_f(WHEEL_X, y, 0)}">
         <joint name="wheel_{prefix}" type="hinge" axis="0 1 0"
                damping="0.05" armature="0.002"/>
-        <geom name="hub_{prefix}" type="cylinder" size="{_f(HUB_R, 0.014)}"
+        <geom name="hub_{prefix}" type="cylinder" size="{_f(HUB_R, HUB_HALF_T)}"
               zaxis="0 1 0" mass="0.30" friction="1.0 0.005 0.0001"
               rgba="0.25 0.28 0.33 1"/>{spokes}
       </body>"""
@@ -115,6 +140,39 @@ def make_stairs() -> str:
     return "\n".join(parts)
 
 
+def _lidar_sites(front: float) -> str:
+    """차체 전방에 장착된 3D LiDAR를 rangefinder 격자(LIDAR_ROWS x LIDAR_COLS)로 근사.
+    각 광선의 방향은 LIDAR_MOUNT_TILT(아래로 기운 각도)를 중심으로
+    수평/수직 화각 안에서 격자로 퍼짐."""
+    lines = []
+    base_pos = (front + 0.02, 0, 0.03)
+    for r in range(LIDAR_ROWS):
+        v = -LIDAR_FOV_V / 2 + LIDAR_FOV_V * (r / max(LIDAR_ROWS - 1, 1))
+        pitch = LIDAR_MOUNT_TILT + v  # 아래로 기울수록 +
+        for c in range(LIDAR_COLS):
+            h = -LIDAR_FOV_H / 2 + LIDAR_FOV_H * (c / max(LIDAR_COLS - 1, 1))
+            zx = math.cos(pitch) * math.cos(h)
+            zy = math.cos(pitch) * math.sin(h)
+            zz = -math.sin(pitch)
+            name = f"lidar_{r}_{c}"
+            lines.append(
+                f'      <site name="{name}" pos="{_f(*base_pos)}" '
+                f'zaxis="{_f(zx, zy, zz)}" size="0.005" rgba="0 1 1 0.35"/>'
+            )
+    return "\n".join(lines)
+
+
+def _lidar_sensors() -> str:
+    lines = []
+    for r in range(LIDAR_ROWS):
+        for c in range(LIDAR_COLS):
+            name = f"lidar_{r}_{c}"
+            lines.append(
+                f'    <rangefinder name="{name}" site="{name}" cutoff="{LIDAR_MAX_RANGE}"/>'
+            )
+    return "\n".join(lines)
+
+
 def build_xml() -> str:
     front = CHASSIS_HALF[0]
     equalities = "\n".join(
@@ -136,7 +194,7 @@ def build_xml() -> str:
 
   <default>
     <default class="spoke">
-      <geom type="capsule" size="{SPOKE_RAD:.4f}"
+      <geom type="capsule"
             friction="1.3 0.005 0.0001" rgba="0.95 0.40 0.10 1"/>
     </default>
   </default>
@@ -154,20 +212,15 @@ def build_xml() -> str:
 
       <!-- 꼬리: 등반 시 뒤로 넘어가는 것 방지 (수동, 저마찰) -->
       <geom name="tail" type="capsule" size="0.012"
-            fromto="{_f(-0.13, 0, -0.02)} {_f(-0.38, 0, -0.055)}"
+            fromto="{_f(-0.13, 0, -0.02)} {_f(-0.3175, 0, -0.04625)}"
             friction="0.15 0.005 0.0001" rgba="0.3 0.3 0.3 1"/>
       <geom name="tail_ball" type="sphere" size="0.020"
-            pos="{_f(-0.38, 0, -0.055)}"
+            pos="{_f(-0.3175, 0, -0.04625)}"
             friction="0.15 0.005 0.0001" rgba="0.2 0.2 0.2 1"/>
 
-      <!-- 센서 사이트: rangefinder는 사이트의 +Z축 방향으로 광선을 쏨 -->
+      <!-- 3D LiDAR 격자 (실제 부품 근사: LIDAR_ROWS x LIDAR_COLS 개의 rangefinder) -->
       <site name="imu" pos="0 0 0" size="0.008" rgba="1 1 0 0.5"/>
-      <site name="rf_front" pos="{_f(front + 0.015, 0, 0.02)}"
-            zaxis="1 0 0" size="0.007" rgba="1 0 0 0.6"/>
-      <site name="rf_diag" pos="{_f(front + 0.015, 0, 0.01)}"
-            zaxis="0.766 0 -0.643" size="0.007" rgba="1 0.5 0 0.6"/>
-      <site name="rf_down" pos="{_f(front + 0.015, 0, -0.02)}"
-            zaxis="0 0 -1" size="0.007" rgba="1 0 1 0.6"/>
+{_lidar_sites(front)}
 
       <!-- 로봇을 따라다니는 카메라 (뷰어에서 [ ] 키로 전환) -->
       <camera name="follow" mode="trackcom" pos="0 -2.2 0.75"
@@ -192,9 +245,7 @@ def build_xml() -> str:
   </actuator>
 
   <sensor>
-    <rangefinder name="rf_front" site="rf_front" cutoff="4"/>
-    <rangefinder name="rf_diag"  site="rf_diag"  cutoff="4"/>
-    <rangefinder name="rf_down"  site="rf_down"  cutoff="4"/>
+{_lidar_sensors()}
     <gyro          name="imu_gyro" site="imu"/>
     <accelerometer name="imu_acc"  site="imu"/>
     <framequat     name="imu_quat" objtype="site" objname="imu"/>
