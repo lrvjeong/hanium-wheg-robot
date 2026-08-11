@@ -22,8 +22,9 @@ import math
 # 튜닝 상수 (여기 숫자만 바꿔가며 실험하세요)
 # ============================================================
 # --- 계단 ---
-N_STEPS   = 5       # 단수
-STEP_H    = 0.10    # 단높이 [m] — 목표 성능: 10cm 단차 극복
+N_STEPS   = 1       # 단수 — 단차 하나만 (5단 계단 대신 단일 층 단차)
+STEP_H    = 0.035   # 단높이 [m] — 목표 성능: 무변형 2cm 통과, 2~5cm는 wheg 변형으로 극복
+                     # (기본값은 도메인 랜덤화 학습 범위(2~5cm)의 중간값 정도로 설정)
 STEP_D    = 0.30    # 단깊이 [m]
 STEP_W    = 1.6     # 계단 폭 [m]
 STAIR_X0  = 1.10    # 로봇 시작점에서 첫 단까지 거리 [m]
@@ -38,24 +39,27 @@ LIDAR_MIN_RANGE  = 0.05   # 실제 부품 최소 인식거리 50mm — 이보다
 LIDAR_MAX_RANGE  = 2.5    # 최대 인식거리 [m] (부품 스펙에 맞춰 조정하세요)
 
 # --- 바퀴 / 스포크 ---
-HUB_R      = 0.095  # 바퀴 허브 반지름 [m] (기존 0.080 → 확대)
-HUB_HALF_T = 0.022  # 허브 원판 반두께 [m] (기존 0.014 → 더 두껍고 존재감 있게)
-ARC_R      = 0.105  # 스포크 호의 반지름 (오므렸을 때 림이 되는 원, 허브와 함께 확대)
+HUB_R      = 0.045  # 바퀴 허브 반지름 [m] — 실제 로봇 디스크 반지름(45mm)과 일치.
+                     # 무변형으로 2cm까지는 통과 가능(HUB_R > 2cm 여유)
+HUB_HALF_T = 0.022  # 허브 원판 반두께 [m]
+ARC_R      = 0.065  # 스포크 호의 반지름 — 훅 전개 시 5cm 단차까지 닿을 수 있는 여유 반영
 ARC_SPAN   = math.radians(95)   # 스포크 호가 덮는 각도
 ARC_SEGMENTS = 5    # 호를 근사하는 캡슐 개수 (기존 2 → 부드러운 곡선을 위해 증가)
 SPOKE_RAD_BASE = 0.013  # 훅 밑동(허브 쪽) 굵기 [m] — 더 두껍게
 SPOKE_RAD_TIP  = 0.006  # 훅 끝(발톱 쪽) 굵기 [m] — 가늘게 테이퍼
 ARC_DIR    = +1     # 훅이 감기는 방향. 등반 시 갈고리가 계단에 안 걸리면 -1로!
 DEPLOY_MAX = 1.85   # 스포크 전개 각도 [rad] (~106도)
-WHEEL_X    = 0.09   # 차체 기준 바퀴 축 위치 (앞쪽 +x, 허브가 커진 만큼 소폭 조정)
-WHEEL_Y    = 0.145  # 차체 중심에서 바퀴까지 좌우 거리 (허브 확대에 맞춰 조정)
+WHEEL_X    = 0.045  # 차체 기준 바퀴 축 위치 (앞쪽 +x, 축소된 차체에 맞춰 비례 조정)
+WHEEL_Y    = 0.120  # 차체 중심에서 바퀴까지 좌우 거리 (작아진 허브에 맞춰 재조정)
 SPOKE_YOFF = 0.030  # 스포크를 허브 바깥면 쪽으로 빼는 오프셋 (허브 두께에 맞춰 조정)
 
 # --- 차체 / 구동 ---
-CHASSIS_HALF = (0.14, 0.09, 0.035)  # 차체 박스 절반 치수 (x, y, z)
+CHASSIS_HALF = (0.069, 0.09, 0.035)  # 차체 박스 절반 치수 (x, y, z) — 실측 도면(137.6mm 전장) 반영
 CHASSIS_MASS = 2.0                  # [kg]
-DRIVE_MAX    = 5.0                  # 바퀴 모터 최대 토크 [N·m]
-START_Z      = 0.105                # 초기 차체 높이
+DRIVE_MAX    = 5.0                  # 바퀴 모터 최대 토크 [N·m] — 평지 주행/등반 시 기본값
+DRIVE_MAX_BOOST = 12.0              # 고토크 모드 최대 토크 [N·m] — 1~2cm 무변형 단차를
+                                     # 스포크 전개 없이 힘으로 밀고 올라갈 때 사용
+START_Z      = 0.050                # 초기 차체 높이 (HUB_R=0.045에 맞춰 재조정 — 바퀴가 딱 지면에 닿도록)
 
 # ============================================================
 def _f(*vals):
@@ -117,12 +121,14 @@ def _wheel(prefix: str, side: int) -> str:
       </body>"""
 
 
-def make_stairs() -> str:
-    """계단 XML. 각 단은 바닥부터 올라오는 통짜 박스."""
+def make_stairs(step_h: float = STEP_H) -> str:
+    """계단 XML. 각 단은 바닥부터 올라오는 통짜 박스.
+    step_h를 인자로 받아서, 매 에피소드 다른 높이로 재생성할 수 있게 함
+    (도메인 랜덤화: 학습 중 계단 높이를 무작위로 바꿔가며 강건한 정책 학습)."""
     parts = []
     for i in range(N_STEPS):
         cx = STAIR_X0 + (i + 0.5) * STEP_D
-        hz = (i + 1) * STEP_H / 2.0
+        hz = (i + 1) * step_h / 2.0
         shade = 0.55 + 0.06 * (i % 2)
         parts.append(
             f'    <geom name="step{i}" type="box" '
@@ -130,7 +136,7 @@ def make_stairs() -> str:
             f'friction="1.1 0.005 0.0001" rgba="{shade} {shade} {shade+0.08} 1"/>'
         )
     # 꼭대기 평지
-    top_h = N_STEPS * STEP_H
+    top_h = N_STEPS * step_h
     cx = STAIR_X0 + N_STEPS * STEP_D + 0.55
     parts.append(
         f'    <geom name="platform" type="box" '
@@ -173,8 +179,11 @@ def _lidar_sensors() -> str:
     return "\n".join(lines)
 
 
-def build_xml() -> str:
+def build_xml(step_h: float = STEP_H) -> str:
     front = CHASSIS_HALF[0]
+    rear = -CHASSIS_HALF[0]
+    tail_x0 = rear + 0.005          # 후미 살짝 안쪽에서 시작
+    tail_x1 = tail_x0 - 0.1875      # 기존 꼬리 돌출 길이(0.1875m) 유지
     equalities = "\n".join(
         f'    <joint joint1="spoke_{p}{k}" joint2="spoke_{p}0" polycoef="0 1 0 0 0"/>'
         for p in ("l", "r") for k in (1, 2)
@@ -203,19 +212,20 @@ def build_xml() -> str:
     <light pos="1 -1 3" dir="-0.3 0.3 -1" directional="true" diffuse="0.9 0.9 0.9"/>
     <geom name="floor" type="plane" size="14 4 0.1" material="grid"/>
 
-{make_stairs()}
+{make_stairs(step_h)}
 
     <body name="chassis" pos="0 0 {START_Z:.4f}">
       <freejoint/>
       <geom name="body_box" type="box" size="{_f(*CHASSIS_HALF)}"
             mass="{CHASSIS_MASS}" rgba="0.16 0.45 0.75 1"/>
 
-      <!-- 꼬리: 등반 시 뒤로 넘어가는 것 방지 (수동, 저마찰) -->
+      <!-- 꼬리: 등반 시 뒤로 넘어가는 것 방지 (수동, 저마찰). 차체 후미(-CHASSIS_HALF[0])
+           기준으로 위치 계산 — 차체 크기가 바뀌어도 자동으로 따라감 -->
       <geom name="tail" type="capsule" size="0.012"
-            fromto="{_f(-0.13, 0, -0.02)} {_f(-0.3175, 0, -0.04625)}"
+            fromto="{_f(tail_x0, 0, -0.02)} {_f(tail_x1, 0, -0.04625)}"
             friction="0.15 0.005 0.0001" rgba="0.3 0.3 0.3 1"/>
       <geom name="tail_ball" type="sphere" size="0.020"
-            pos="{_f(-0.3175, 0, -0.04625)}"
+            pos="{_f(tail_x1, 0, -0.04625)}"
             friction="0.15 0.005 0.0001" rgba="0.2 0.2 0.2 1"/>
 
       <!-- 3D LiDAR 격자 (실제 부품 근사: LIDAR_ROWS x LIDAR_COLS 개의 rangefinder) -->
@@ -236,8 +246,8 @@ def build_xml() -> str:
   </equality>
 
   <actuator>
-    <motor    name="drive_l"  joint="wheel_l"  gear="1" ctrlrange="-{DRIVE_MAX} {DRIVE_MAX}"/>
-    <motor    name="drive_r"  joint="wheel_r"  gear="1" ctrlrange="-{DRIVE_MAX} {DRIVE_MAX}"/>
+    <motor    name="drive_l"  joint="wheel_l"  gear="1" ctrlrange="-{DRIVE_MAX_BOOST} {DRIVE_MAX_BOOST}"/>
+    <motor    name="drive_r"  joint="wheel_r"  gear="1" ctrlrange="-{DRIVE_MAX_BOOST} {DRIVE_MAX_BOOST}"/>
     <position name="deploy_l" joint="spoke_l0" kp="40" forcerange="-30 30"
               ctrlrange="0 {DEPLOY_MAX}"/>
     <position name="deploy_r" joint="spoke_r0" kp="40" forcerange="-30 30"
