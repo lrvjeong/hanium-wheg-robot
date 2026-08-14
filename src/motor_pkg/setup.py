@@ -23,6 +23,7 @@ setup(
     entry_points={
         'console_scripts': [
             'motor_interface_node = motor_pkg.motor_interface_node:main',
+            'motor_driver_node = motor_pkg.motor_driver_node:main',
         ],
     },
 )
