@@ -36,6 +36,7 @@ import mujoco
 
 from climber_scene import (
     build_xml, DEPLOY_MAX, DRIVE_MAX, DRIVE_MAX_BOOST, N_STEPS, STEP_H,
+    STEP_D, STAIR_X0, LEG_MAX_ANGLE,
     LIDAR_ROWS, LIDAR_COLS, LIDAR_MIN_RANGE, LIDAR_MAX_RANGE,
     LIDAR_FOV_V, LIDAR_MOUNT_TILT, START_Z,
 )
@@ -43,14 +44,33 @@ from climber_scene import (
 # ===== 튜닝 상수 =====
 PITCH_FLIP = 1.2
 ROLL_FLIP = 1.0
-CTRL_COST_W = 0.01
+CTRL_COST_W = 0.005   # 기존 0.01 -> 하향 (토크 쓰는 걸 너무 겁내지 않도록)
 PITCH_PENALTY_W = 0.3
 ROLL_PENALTY_W = 0.5
 YAW_PENALTY_W = 0.5
-FORWARD_REWARD_W = 8.0
+FORWARD_REWARD_W = 15.0  # 기존 8.0 -> 상향 (전진을 훨씬 매력적으로)
+IDLE_PENALTY_W = 2.0     # 움직여야 하는 구간(DRIVE/CLIMB/PUSH)에서 실제로
+                          # 거의 안 움직이면 매 스텝 부과되는 페널티
+ACTION_RATE_PENALTY_W = 0.3  # 직전 스텝 액션 대비 급격한 변화에 부과되는
+                              # 페널티 - 좌우 바퀴가 들쭉날쭉하게 튀는
+                              # 부산스러운 움직임을 줄이기 위함
+IDLE_DIST_THRESH = 0.001  # 이 정도(1mm) 이하 전진이면 "정지 중"으로 간주
 HEIGHT_REWARD_W = 20.0
 FLIP_PENALTY = 20.0
 SUCCESS_BONUS = 50.0
+# 목표 계단 높이의 이 비율 이상 실제로 상승해야 "성공"으로 인정
+# (고정 마진을 쓰면 계단이 낮을 때 마진이 0에 가까워져서 리셋 직후 미세한
+# 물리 흔들림만으로 성공 오탐이 나던 버그가 있었음 -> 비율 기반으로 수정)
+SUCCESS_HEIGHT_FRACTION = 0.8
+# 계단까지 실제로 이동했는지 확인하는 최소 전진거리 [m] — climber_scene.py의
+# STAIR_X0(로봇 시작점~첫 계단 거리, 1.10m)를 감안해 정함. 이게 없으면
+# 제자리에서 위아래로 튀기만 해도 height_gained 조건은 만족시킬 수 있어서
+# 반드시 같이 걸어야 함.
+# 계단까지 실제로 이동했는지 확인하는 최소 전진거리 [m] — climber_scene.py의
+# STAIR_X0(로봇 시작점~첫 계단 거리, 1.10m) + 꼬리가 차체 뒤로 나온 길이(~0.25m)
+# 를 감안해서 정함. 이게 짧으면 꼬리가 아직 계단에 걸쳐있는데도(차체만 이미
+# 계단 위) 성공 처리될 수 있음 — 실제로 이 문제가 있었어서 1.0 -> 1.4로 상향.
+SUCCESS_MIN_FORWARD_DIST = 1.4
 N_SUBSTEPS = 10
 MAX_EPISODE_STEPS = 500
 
@@ -62,7 +82,7 @@ STEP_H_MAX = 0.05    # 학습 시 계단 높이 랜덤 범위 상한 [m] — whe
 LOW_STEP_THRESH = 0.02
 # 라이다 추정치가 실제보다 낮게 나오는 경향(꼭대기 대신 옆면에 걸리는 행이
 # 있을 수 있음)이 있어서, 애매한 경우 안전한 쪽(DEPLOY)으로 가도록 여유를 둠
-HEIGHT_SAFETY_MARGIN = 0.012
+HEIGHT_SAFETY_MARGIN = 0.005  # 기존 0.012 -> 하향, PUSH 분류가 더 자주 나오게
 
 # ----- 상태기계 타이밍 -----
 MEASURE_DWELL = 0.30      # MEASURE 상태 유지 시간 [s] — 여러 프레임 스캔해서 누적
@@ -72,7 +92,7 @@ DEPLOY_TIMEOUT = 1.5      # DEPLOY 최대 대기 시간 [s]
 PITCH_FLAT = 0.12
 GYRO_CALM = 0.5
 CLEAR_TIME = 1.2          # CLIMB에서 이 시간만큼 안정되면 RETRACT로 전환
-RETRACT_DONE = 0.15       # 이 각도 이하로 접히면 RETRACT 완료 [rad]
+RETRACT_DONE = 0.1        # 다리가 이 각도[rad] 이하로 접히면 RETRACT 완료
 RETRACT_TIMEOUT = 1.5     # RETRACT 최대 대기 시간 [s]
 
 N_LIDAR = LIDAR_ROWS * LIDAR_COLS
@@ -96,6 +116,11 @@ def _lidar_scan(data):
 # — climber_scene.py의 _lidar_sites base_pos z값(0.03)과 반드시 맞춰야 함
 _SENSOR_HEIGHT = START_Z + 0.03
 _HEIGHT_MARGIN = 0.010  # 노이즈 대비 여유 [m] — 이 이상 짧게 찍혀야 "장애물"로 판정
+# 감지(wall_near) 판정에 걸리는 절대 최대 거리 [m] — 이게 없으면 수평에 가까운
+# 행은 '장애물 없을 때 예상거리' 자체가 워낙 커서(1m 이상), 계단과 무관한 먼
+# 지형에도 반응해 너무 일찍 멈춰서는 문제가 있었음. 실제로 계단 코앞까지
+# 왔을 때만 반응하도록 근거리로 제한.
+_MAX_DETECT_DIST = 0.18
 
 # 각 행(row)의 하향각. climber_scene.py의 _lidar_sites와 동일한 공식
 # (pitch = LIDAR_MOUNT_TILT + v). 행마다 화각이 달라서, 로봇-계단 거리에 따라
@@ -125,12 +150,37 @@ def _scan_obstruction(lidar_flat):
             continue  # 수평 이상은 지면 반사 기준 계산 불가 (스킵)
         d = float(grid[r, mid_col])
         expected_ground_dist = _SENSOR_HEIGHT / math.sin(theta)
-        if d < expected_ground_dist - _HEIGHT_MARGIN:
+        if d < expected_ground_dist - _HEIGHT_MARGIN and d < _MAX_DETECT_DIST:
             detected = True
             height = _SENSOR_HEIGHT - d * math.sin(theta)
             best_height = max(best_height, height)
 
     return detected, max(0.0, best_height)
+
+
+_STEP_CX = STAIR_X0 + 0.5 * STEP_D          # step0 x위치 (계단 높이와 무관, 고정)
+_PLATFORM_CX = STAIR_X0 + N_STEPS * STEP_D + 0.55  # platform x위치 (고정)
+
+
+def _set_step_height(model, step_h):
+    """모델을 통째로 다시 빌드하지 않고, step0/platform geom의 크기·위치만
+    그 자리에서 바꿔서 계단 높이를 변경. 뷰어가 model 객체를 계속 붙들고
+    있어도(재생성 없이) 문제없이 반영됨 -> 매 에피소드 모델을 새로 만들면서
+    생기던 '뷰어가 옛날 객체를 계속 그림' 문제, 그리고 그걸 고치려고
+    에피소드마다 뷰어를 새로 열었다 닫으면서 생기던 GLX 크래시 문제를
+    둘 다 근본적으로 없앰."""
+    step_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, "step0")
+    platform_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, "platform")
+
+    hz = step_h / 2.0
+    model.geom_size[step_id][2] = hz
+    model.geom_pos[step_id][2] = hz
+    model.geom_pos[step_id][0] = _STEP_CX
+
+    top_h = N_STEPS * step_h
+    model.geom_size[platform_id][2] = top_h / 2.0
+    model.geom_pos[platform_id][2] = top_h / 2.0
+    model.geom_pos[platform_id][0] = _PLATFORM_CX
 
 
 def _quat_to_euler(quat):
@@ -169,7 +219,7 @@ class WhegEnv(gym.Env):
         ])
         obs_high = np.concatenate([
             np.full(N_LIDAR, LIDAR_MAX_RANGE, dtype=np.float32),
-            np.array([math.pi, 50.0, math.pi, 50.0, math.pi, 50.0, DEPLOY_MAX], dtype=np.float32),
+            np.array([math.pi, 50.0, math.pi, 50.0, math.pi, 50.0, LEG_MAX_ANGLE], dtype=np.float32),
         ])
         self.observation_space = spaces.Box(low=obs_low, high=obs_high, dtype=np.float32)
 
@@ -183,6 +233,8 @@ class WhegEnv(gym.Env):
         self._step_count = 0
         self._prev_x = 0.0
         self._prev_z = 0.0
+        self._start_x = 0.0
+        self._prev_action = np.zeros(2, dtype=np.float32)
         self._start_z = 0.0
         self._measure_max_h = 0.0
         self._start_yaw = 0.0
@@ -202,7 +254,7 @@ class WhegEnv(gym.Env):
         pitch_rate = float(self.data.sensor("imu_gyro").data[1])
         roll_rate = float(self.data.sensor("imu_gyro").data[0])
         yaw_rate = float(self.data.sensor("imu_gyro").data[2])
-        deploy = float(self.data.joint("spoke_l0").qpos[0])
+        deploy = float(self.data.joint("leg_l0").qpos[0])
         return lidar, np.array(
             [pitch, pitch_rate, roll, roll_rate, yaw_rel, yaw_rate, deploy],
             dtype=np.float32,
@@ -222,7 +274,7 @@ class WhegEnv(gym.Env):
         """
         self._t_in_mode += self._dt
         wall_near, live_height = _scan_obstruction(lidar)
-        opened = float(self.data.joint("spoke_l0").qpos[0])
+        opened = float(self.data.joint("leg_l0").qpos[0])  # 다리 각도 기준 (0=접힘, 양수=열림)
 
         if self._mode == "DRIVE":
             allow_drive, deploy_target, drive_max = True, 0.0, DRIVE_MAX
@@ -256,12 +308,12 @@ class WhegEnv(gym.Env):
                 self._mode, self._t_in_mode = "DEPLOY", 0.0
 
         elif self._mode == "DEPLOY":
-            allow_drive, deploy_target, drive_max = False, DEPLOY_MAX, DRIVE_MAX
-            if opened > DEPLOY_MAX * DEPLOY_DONE or self._t_in_mode > DEPLOY_TIMEOUT:
+            allow_drive, deploy_target, drive_max = False, LEG_MAX_ANGLE, DRIVE_MAX
+            if opened > LEG_MAX_ANGLE * DEPLOY_DONE or self._t_in_mode > DEPLOY_TIMEOUT:
                 self._mode, self._t_in_mode, self._clear_t = "CLIMB", 0.0, 0.0
 
         elif self._mode == "CLIMB":
-            allow_drive, deploy_target, drive_max = True, DEPLOY_MAX, DRIVE_MAX
+            allow_drive, deploy_target, drive_max = True, LEG_MAX_ANGLE, DRIVE_MAX
             calm = (not wall_near) and abs(pitch) < PITCH_FLAT and abs(pitch_rate) < GYRO_CALM
             self._clear_t = self._clear_t + self._dt if calm else 0.0
             if self._clear_t > CLEAR_TIME:
@@ -288,7 +340,7 @@ class WhegEnv(gym.Env):
         self.data.actuator("drive_r").ctrl = drive_r
         self.data.actuator("deploy_l").ctrl = deploy_target
         self.data.actuator("deploy_r").ctrl = deploy_target
-        return drive_l, drive_r, drive_max
+        return drive_l, drive_r, drive_max, allow_drive
 
     # ------------------------------------------------------------
     def reset(self, *, seed=None, options=None):
@@ -298,13 +350,7 @@ class WhegEnv(gym.Env):
 
         if self.randomize_terrain:
             self._step_h = float(self.np_random.uniform(STEP_H_MIN, STEP_H_MAX))
-            self._xml = build_xml(self._step_h)
-            self.model = mujoco.MjModel.from_xml_string(self._xml)
-            self.data = mujoco.MjData(self.model)
-            self._dt = self.model.opt.timestep * N_SUBSTEPS
-            if self.render_mode == "human" and self._viewer is not None:
-                self._viewer.close()
-                self._viewer = None
+            _set_step_height(self.model, self._step_h)
 
         mujoco.mj_resetDataKeyframe(self.model, self.data, 0)
         noise = self.np_random.uniform(-0.01, 0.01, size=self.model.nq)
@@ -314,6 +360,8 @@ class WhegEnv(gym.Env):
         self._step_count = 0
         x, _, z = self.data.body("chassis").xpos
         self._prev_x, self._prev_z = float(x), float(z)
+        self._start_x = float(x)  # 성공 판정용 — 실제로 앞으로 이동했는지 확인
+        self._prev_action = np.zeros(2, dtype=np.float32)
         self._start_z = float(z)  # 성공 판정 기준 — 절대높이가 아니라 이 값 대비 상승분으로 판단
         _, _, yaw0 = _quat_to_euler(self.data.sensor("imu_quat").data)
         self._start_yaw = yaw0
@@ -329,9 +377,15 @@ class WhegEnv(gym.Env):
         }
 
     def step(self, action):
+        action = np.asarray(action, dtype=np.float32)
+        action_rate_penalty = ACTION_RATE_PENALTY_W * float(
+            np.sum((action - self._prev_action) ** 2)
+        )
+        self._prev_action = action.copy()
+
         lidar, rest = self._get_obs()
         pitch, pitch_rate = float(rest[0]), float(rest[1])
-        drive_l, drive_r, drive_max = self._apply_action(action, lidar, pitch, pitch_rate)
+        drive_l, drive_r, drive_max, allow_drive = self._apply_action(action, lidar, pitch, pitch_rate)
 
         for _ in range(N_SUBSTEPS):
             mujoco.mj_step(self.model, self.data)
@@ -354,8 +408,12 @@ class WhegEnv(gym.Env):
         roll_penalty = ROLL_PENALTY_W * (roll ** 2)
         yaw_penalty = YAW_PENALTY_W * (yaw_rel ** 2)
 
+        # 움직여도 되는 구간(DRIVE/CLIMB/PUSH)인데 실제로 거의 안 움직이면
+        # 페널티 — "가만히 있기"가 매력적인 선택지가 되는 걸 막기 위함
+        idle_penalty = IDLE_PENALTY_W if (allow_drive and dx < IDLE_DIST_THRESH) else 0.0
+
         reward = FORWARD_REWARD_W * dx + HEIGHT_REWARD_W * max(dz, 0.0)
-        reward -= ctrl_cost + pitch_penalty + roll_penalty + yaw_penalty
+        reward -= ctrl_cost + pitch_penalty + roll_penalty + yaw_penalty + idle_penalty + action_rate_penalty
 
         terminated = False
         truncated = False
@@ -371,7 +429,21 @@ class WhegEnv(gym.Env):
             info["termination_reason"] = "flipped"
 
         height_gained = z - self._start_z
-        if height_gained > self._step_h - 0.01 and not terminated:
+        forward_dist = x - self._start_x
+        # 고정 마진(예: -1cm) 대신 목표 높이의 비율로 판정 — 계단 높이가
+        # 1cm까지 낮아진 상황에서 고정 마진을 쓰면 마진이 0에 가까워져서
+        # 리셋 직후 미세한 물리 흔들림만으로 성공 오탐이 나던 버그를 수정.
+        # 최소 스텝 수 조건 + 최소 전진거리 조건도 추가로 걸어서, 제자리에서
+        # 위아래로 튀기만 해도(전진 없이) 성공 처리되던 허점을 막음.
+        # + IMU(pitch) 기준 "다시 수평" 조건 추가 — 이게 없으면 앞부분만
+        # 계단 위에 걸친 상태(꼬리는 아직 안 올라옴, 차체는 기울어진 채)에서도
+        # height_gained/forward_dist 조건만으로 조기 성공 처리될 수 있었음.
+        is_level = abs(pitch) < PITCH_FLAT
+        if (self._step_count > 10
+                and height_gained > SUCCESS_HEIGHT_FRACTION * self._step_h
+                and forward_dist > SUCCESS_MIN_FORWARD_DIST
+                and is_level
+                and not terminated):
             reward += SUCCESS_BONUS
             terminated = True
             info["termination_reason"] = "success"

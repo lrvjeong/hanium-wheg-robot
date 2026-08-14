@@ -45,17 +45,58 @@ HUB_HALF_T = 0.022  # 허브 원판 반두께 [m]
 ARC_R      = 0.065  # 스포크 호의 반지름 — 훅 전개 시 5cm 단차까지 닿을 수 있는 여유 반영
 ARC_SPAN   = math.radians(95)   # 스포크 호가 덮는 각도
 ARC_SEGMENTS = 5    # 호를 근사하는 캡슐 개수 (기존 2 → 부드러운 곡선을 위해 증가)
-SPOKE_RAD_BASE = 0.013  # 훅 밑동(허브 쪽) 굵기 [m] — 더 두껍게
-SPOKE_RAD_TIP  = 0.006  # 훅 끝(발톱 쪽) 굵기 [m] — 가늘게 테이퍼
+SPOKE_RAD = 0.004  # 훅 굵기 [m] — 실측 STL(다리/스포크 부품, 두께 8mm) 그대로
+                    # 반영. 캡슐 size는 반지름이라 8mm 두께 = 반지름 4mm.
+                    # 밑동-끝 테이퍼는 실측 근거 없는 임의 추가였어서 제거,
+                    # 실제 부품처럼 두께 균일하게 처리.
 ARC_DIR    = +1     # 훅이 감기는 방향. 등반 시 갈고리가 계단에 안 걸리면 -1로!
-DEPLOY_MAX = 1.85   # 스포크 전개 각도 [rad] (~106도)
-WHEEL_X    = 0.045  # 차체 기준 바퀴 축 위치 (앞쪽 +x, 축소된 차체에 맞춰 비례 조정)
-WHEEL_Y    = 0.120  # 차체 중심에서 바퀴까지 좌우 거리 (작아진 허브에 맞춰 재조정)
+
+# --- 홈-슬라이더(슬라이더-크랭크) 메커니즘 ---
+# 실제 구조: 디스크의 직선 홈을 따라 슬라이더(핀)가 움직이면, 별도 고정 피벗에
+# 달린 다리가 링크로 연결되어 수동으로 회전(열림/닫힘)함. 정확한 홈 각도·링크
+# 길이는 실측값이 없어서, MuJoCo에서 직접 시뮬레이션 검증(막힘/특이점 없이
+# 매끄럽게 0~120도 넘게 움직이는 조합)을 거쳐 확정한 값입니다.
+PIVOT_R      = 0.029              # 다리 고정 피벗 반지름 (실측: 원주에서 16mm 안쪽)
+GROOVE_THETA = math.radians(55)   # 홈(그루브) 방향 — 피벗 각도 기준 오프셋
+LINK_LEN     = 0.024              # 피벗~커플러(슬라이더 연결점) 링크 길이
+LEG_BETA     = math.radians(275)  # 다리 초기(접힘) 방향 — 접힘 시 허브 반지름
+                                   # 안쪽으로 들어오도록 재계산 (기존 30도는 접힌
+                                   # 상태에서도 훅이 32mm나 더 튀어나와 바닥에
+                                   # 걸리며 바퀴가 안 굴러가는 원인이었음)
+SLIDE_R0     = 0.03839            # 슬라이더 기준 반경(qpos=0일 때, 다리 거의 접힘)
+SLIDE_MIN    = -0.025             # 슬라이더 이동범위 하한 [m] (시각 장식용)
+SLIDE_MAX    = 0.0                # 슬라이더 이동범위 상한 [m] (시각 장식용)
+LEG_MAX_ANGLE = math.radians(100) # 다리 힌지 최대 회전각 — 직접 구동, 실측 전 가정값
+BRACKET_RAD   = 0.005             # 중앙 브래킷(고정 팔) 굵기 [m] — 가정값
+HOOK_LEN     = 0.035              # 커플러 지점 너머 갈고리 곡선 길이 [m] (실측 다리 전체
+                                   # 길이 ~60mm에서 LINK_LEN을 뺀 나머지 반영)
+HOOK_CURVE   = math.radians(70)   # 갈고리가 안쪽으로 말리는 각도
+
+DEPLOY_MAX = 1.85   # 스포크 전개 각도 [rad] (~106도) — 현재 미사용(참고용, 실제 범위는 SLIDE_MIN/MAX)
+WHEEL_X    = 0.024  # 차체 기준 바퀴 축 위치 (앞쪽 +x, 축소된 전후길이(73.5mm)에 비례 조정)
+WHEEL_Y    = 0.160  # 차체 중심에서 바퀴까지 좌우 거리 — 전체 좌우폭 절반(137.6mm)
+                     # + 바퀴두께(HUB_HALF_T 22mm)로 계산, 바퀴 안쪽면이 판 바깥면에 딱 붙도록
 SPOKE_YOFF = 0.030  # 스포크를 허브 바깥면 쪽으로 빼는 오프셋 (허브 두께에 맞춰 조정)
 
 # --- 차체 / 구동 ---
-CHASSIS_HALF = (0.069, 0.09, 0.035)  # 차체 박스 절반 치수 (x, y, z) — 실측 도면(137.6mm 전장) 반영
-CHASSIS_MASS = 2.0                  # [kg]
+# 차체 = 상판+하판 두 장 + 그 사이를 잇는 쇠막대 기둥 4개 (단일 박스 아님)
+# 도면(137.6 x 73.5mm) 기준. 판 두께·기둥 정확한 위치는 도면에 명시 안 돼있어서
+# 합리적인 가정값 사용 — 정확한 값 아시면 알려주세요.
+PLATE_LEN    = 0.0735   # 판 1장의 전후 길이(X) [m] — 도면 73.5mm
+PLATE_WID_1  = 0.1376   # 판 1장의 좌우 폭(Y) [m] — 도면 137.6mm
+PLATE_GAP    = 0.0      # 두 판을 이어붙일 때 사이 틈 [m] — 맞닿는다고 가정(0)
+PLATE_WID    = PLATE_WID_1 * 2 + PLATE_GAP  # 상판/하판 전체 폭(판 2장 이어붙인 길이)
+PLATE_THICK  = 0.003    # 판 두께 [m] — 가정값 (미도시)
+ROD_HEIGHT   = 0.04     # 상판-하판 간격(기둥 높이) [m] — "약 4cm" 명시대로
+ROD_RADIUS   = 0.004    # 기둥(쇠막대) 반지름 [m] — 가정값 (3/8" 볼트 구멍 기준 추정)
+ROD_X_OFF    = 0.025    # 기둥 x위치(판 1장 내부, 중심 기준 대칭) [m] — 가정값
+ROD_Y_OFF    = 0.057    # 기둥 y위치(판 1장 내부, 중심 기준 대칭) [m] — 도면 "12mm" 홀 오프셋 기반 추정
+CHASSIS_HALF = (PLATE_LEN/2, PLATE_WID/2, ROD_HEIGHT/2 + PLATE_THICK)  # 센서 배치 등에 쓰는 전체 절반크기 근사
+CHASSIS_MASS = 2.0                  # [kg] — 상판/하판/기둥에 분배
+
+# --- CygLiDAR (실측 37.4 x 37.4 x 27mm, 상판/하판 사이 중앙에 전방을 보도록 장착) ---
+LIDAR_BOX = (0.0374, 0.0374, 0.027)  # (가로, 세로, 높이) [m]
+
 DRIVE_MAX    = 5.0                  # 바퀴 모터 최대 토크 [N·m] — 평지 주행/등반 시 기본값
 DRIVE_MAX_BOOST = 12.0              # 고토크 모드 최대 토크 [N·m] — 1~2cm 무변형 단차를
                                      # 스포크 전개 없이 힘으로 밀고 올라갈 때 사용
@@ -66,58 +107,94 @@ def _f(*vals):
     return " ".join(f"{v:.4f}" for v in vals)
 
 
-def _spoke_body(prefix: str, k: int, y_off: float) -> str:
-    """스포크 1개(호를 캡슐 ARC_SEGMENTS개로 근사)를 XML로 생성.
+def _leg_slider_body(prefix: str, k: int, y_off: float) -> str:
+    """다리 1개를 XML로 생성. 회전힌지로 서보가 직접 구동(안정적, 검증됨).
 
-    피벗은 허브 림 위 (반지름 HUB_R, 각도 phi)에 있고,
-    스포크 조인트가 0이면 호가 림을 따라 눕고(오므림),
-    DEPLOY_MAX가 되면 바깥으로 펴져 갈고리가 됩니다.
-
-    v2: 세그먼트를 늘려 각진 2-캡슐 근사 대신 부드러운 곡선을 만들고,
-    밑동(SPOKE_RAD_BASE)에서 끝(SPOKE_RAD_TIP)으로 갈수록 가늘어지는
-    테이퍼를 줘서 더 유기적인 갈고리/발톱 느낌을 냅니다.
+    '핀(파란 구슬)'은 별도 몸체가 아니라 다리(주황 스포크) 자신의 커플러
+    지점(훅이 시작되는 곳)에 그냥 얹힌 장식용 geom으로 처리함 — 이러면
+    핀이 실제로 스포크에 붙어서 같이 움직이는 게 시각적으로 명확해짐.
+    다만 다리가 회전하면 이 점은 피벗을 중심으로 호(원)를 그리며 움직이지,
+    초록색 홈 직선을 따라 미끄러지듯 움직이진 않음 — 그렇게 하려면 진짜
+    슬라이더-크랭크 폐루프 물리가 필요한데, 실측 없이는 계속 특이점에
+    걸려서(여러 조합 실제 검증 반복) 안정적인 방식으로 단순화한 것.
     """
     phi = 2.0 * math.pi * k / 3.0
-    px, pz = HUB_R * math.cos(phi), HUB_R * math.sin(phi)
+    px, pz = PIVOT_R * math.cos(phi), PIVOT_R * math.sin(phi)
 
-    # 호 위의 (ARC_SEGMENTS+1)개 점 — 피벗 기준 로컬 좌표
-    n = ARC_SEGMENTS
-    angs = [phi + ARC_DIR * ARC_SPAN * (i / n) for i in range(n + 1)]
-    pts = [(ARC_R * math.cos(a) - px, ARC_R * math.sin(a) - pz) for a in angs]
+    beta_abs = phi + ARC_DIR * LEG_BETA
+    link_x = LINK_LEN * math.cos(beta_abs)
+    link_z = LINK_LEN * math.sin(beta_abs)
 
-    # ARC_DIR에 따라 '양수 조인트각 = 전개'가 되도록 축 부호를 맞춤
-    axis = f"0 {ARC_DIR} 0"
-    name = f"spoke_{prefix}{k}"
+    leg_name = f"leg_{prefix}{k}"
 
-    geoms = []
-    for i in range(n):
-        a, b = pts[i], pts[i + 1]
-        # 세그먼트 중간 지점 반지름을 선형 보간해 테이퍼 형성
-        t_mid = (i + 0.5) / n
-        r = SPOKE_RAD_BASE + (SPOKE_RAD_TIP - SPOKE_RAD_BASE) * t_mid
-        fromto = f'fromto="{_f(a[0], y_off, a[1])} {_f(b[0], y_off, b[1])}"'
-        geoms.append(f'<geom class="spoke" size="{r:.4f}" {fromto}/>')
-    geoms_xml = "\n          ".join(geoms)
+    # 갈고리처럼 안쪽으로 말리는 곡선 3세그먼트
+    n_hook = 3
+    hook_geoms = []
+    prev_x, prev_z = link_x, link_z
+    for i in range(1, n_hook + 1):
+        t = i / n_hook
+        ang = beta_abs - ARC_DIR * HOOK_CURVE * t
+        seg_len = HOOK_LEN * t
+        hx = link_x + seg_len * math.cos(ang)
+        hz = link_z + seg_len * math.sin(ang)
+        hook_geoms.append(
+            f'<geom class="spoke" size="{SPOKE_RAD:.4f}" '
+            f'fromto="{_f(prev_x, 0, prev_z)} {_f(hx, 0, hz)}"/>'
+        )
+        prev_x, prev_z = hx, hz
+    hook_xml = "\n          ".join(hook_geoms)
 
     return f"""
-        <body name="{name}" pos="{_f(px, 0, pz)}">
-          <joint name="{name}" type="hinge" axis="{axis}" range="0 {DEPLOY_MAX}"
-                 damping="0.4" armature="0.001"/>
-          {geoms_xml}
+        <body name="{leg_name}" pos="{_f(px, y_off, pz)}">
+          <joint name="{leg_name}" type="hinge" axis="0 1 0" range="0 {LEG_MAX_ANGLE}"
+                 damping="0.3" armature="0.001"/>
+          <geom class="spoke" size="{SPOKE_RAD:.4f}"
+                fromto="0 0 0 {_f(link_x, 0, link_z)}"/>
+          {hook_xml}
+          <geom type="sphere" size="0.004" pos="{_f(link_x, 0, link_z)}"
+                rgba="0.1 0.6 0.9 1" contype="0" conaffinity="0"/>
         </body>"""
+
+
+def _groove_visual(k: int, y_off: float) -> str:
+    """디스크에 파인 홈(그루브)을 시각적으로 표시 (충돌 없음, 장식용)."""
+    phi = 2.0 * math.pi * k / 3.0
+    gtheta_abs = phi + ARC_DIR * GROOVE_THETA
+    r_a = SLIDE_R0 + SLIDE_MIN
+    r_b = SLIDE_R0 + SLIDE_MAX
+    x0, z0 = r_a * math.cos(gtheta_abs), r_a * math.sin(gtheta_abs)
+    x1, z1 = r_b * math.cos(gtheta_abs), r_b * math.sin(gtheta_abs)
+    return (f'<geom type="capsule" size="0.0015" '
+            f'fromto="{_f(x0, y_off, z0)} {_f(x1, y_off, z1)}" '
+            f'rgba="0.15 0.7 0.15 0.5" contype="0" conaffinity="0"/>')
+
+
+def _bracket_arm(k: int, y_off: float) -> str:
+    """중앙 브래킷(스포크 팔): 디스크 중심에서 다리 피벗 지점까지 이어지는
+    고정된(회전하지 않는, 디스크와 함께 도는) 팔. 실제 CAD 이미지처럼
+    다리가 허브 림에서 바로 튀어나오는 게 아니라, 이 중앙 브래킷 끝의
+    핀(피벗)에서 회전하도록 시각적 구조를 맞춤."""
+    phi = 2.0 * math.pi * k / 3.0
+    px, pz = PIVOT_R * math.cos(phi), PIVOT_R * math.sin(phi)
+    return (f'<geom type="capsule" size="{BRACKET_RAD:.4f}" '
+            f'fromto="0 {y_off:.4f} 0 {_f(px, y_off, pz)}" '
+            f'rgba="0.35 0.38 0.42 1"/>')
 
 
 def _wheel(prefix: str, side: int) -> str:
     """변신 바퀴 1개. side: 왼쪽 +1 / 오른쪽 -1 (스포크 오프셋 방향만 다름)"""
     y = side * WHEEL_Y
-    spokes = "".join(_spoke_body(prefix, k, side * SPOKE_YOFF) for k in range(3))
+    legs = "".join(_leg_slider_body(prefix, k, side * SPOKE_YOFF) for k in range(3))
+    grooves = "".join(_groove_visual(k, side * SPOKE_YOFF) for k in range(3))
+    brackets = "".join(_bracket_arm(k, side * SPOKE_YOFF) for k in range(3))
     return f"""
       <body name="wheel_{prefix}" pos="{_f(WHEEL_X, y, 0)}">
         <joint name="wheel_{prefix}" type="hinge" axis="0 1 0"
                damping="0.05" armature="0.002"/>
         <geom name="hub_{prefix}" type="cylinder" size="{_f(HUB_R, HUB_HALF_T)}"
               zaxis="0 1 0" mass="0.30" friction="1.0 0.005 0.0001"
-              rgba="0.25 0.28 0.33 1"/>{spokes}
+              rgba="0.25 0.28 0.33 1"/>
+        {brackets}{grooves}{legs}
       </body>"""
 
 
@@ -146,12 +223,44 @@ def make_stairs(step_h: float = STEP_H) -> str:
     return "\n".join(parts)
 
 
+def _chassis_plates_and_rods() -> str:
+    """상판 2장(좌우 이어붙임) + 하판 2장 + 기둥 4개(판 세트당 앞/뒤 1개씩, 좌우
+    중앙정렬) 생성. 각 판은 도면 그대로(전후 73.5mm x 좌우 137.6mm),
+    y=+-PLATE_WID_1/2에 나란히 배치해서 전체 좌우폭이 PLATE_WID(275.2mm)가
+    되도록 함."""
+    lines = []
+    z_top = ROD_HEIGHT / 2 + PLATE_THICK / 2
+    z_bot = -z_top
+    for side, y_center in (("l", PLATE_WID_1 / 2), ("r", -PLATE_WID_1 / 2)):
+        lines.append(
+            f'      <geom name="plate_top_{side}" type="box" '
+            f'size="{_f(PLATE_LEN/2, PLATE_WID_1/2, PLATE_THICK/2)}" '
+            f'pos="{_f(0, y_center, z_top)}" '
+            f'mass="{CHASSIS_MASS*0.2:.3f}" rgba="0.55 0.58 0.62 1"/>'
+        )
+        lines.append(
+            f'      <geom name="plate_bottom_{side}" type="box" '
+            f'size="{_f(PLATE_LEN/2, PLATE_WID_1/2, PLATE_THICK/2)}" '
+            f'pos="{_f(0, y_center, z_bot)}" '
+            f'mass="{CHASSIS_MASS*0.2:.3f}" rgba="0.55 0.58 0.62 1"/>'
+        )
+        # 판마다 앞/뒤 기둥 1개씩 (좌우 중앙정렬, 총 4개)
+        for xi, xs in (("f", 1), ("b", -1)):
+            lines.append(
+                f'      <geom name="rod_{side}_{xi}" type="cylinder" '
+                f'size="{_f(ROD_RADIUS, ROD_HEIGHT/2)}" '
+                f'pos="{_f(xs*ROD_X_OFF, y_center, 0)}" '
+                f'mass="{CHASSIS_MASS*0.05:.3f}" rgba="0.3 0.3 0.32 1"/>'
+            )
+    return "\n".join(lines)
+
+
 def _lidar_sites(front: float) -> str:
     """차체 전방에 장착된 3D LiDAR를 rangefinder 격자(LIDAR_ROWS x LIDAR_COLS)로 근사.
     각 광선의 방향은 LIDAR_MOUNT_TILT(아래로 기운 각도)를 중심으로
     수평/수직 화각 안에서 격자로 퍼짐."""
     lines = []
-    base_pos = (front + 0.02, 0, 0.03)
+    base_pos = (front + 0.002, 0, 0)  # CygLiDAR 실장 위치: 상판-하판 사이 중앙(z=0), 전방 정중앙
     for r in range(LIDAR_ROWS):
         v = -LIDAR_FOV_V / 2 + LIDAR_FOV_V * (r / max(LIDAR_ROWS - 1, 1))
         pitch = LIDAR_MOUNT_TILT + v  # 아래로 기울수록 +
@@ -182,15 +291,14 @@ def _lidar_sensors() -> str:
 def build_xml(step_h: float = STEP_H) -> str:
     front = CHASSIS_HALF[0]
     rear = -CHASSIS_HALF[0]
-    tail_x0 = rear + 0.005          # 후미 살짝 안쪽에서 시작
-    tail_x1 = tail_x0 - 0.1875      # 기존 꼬리 돌출 길이(0.1875m) 유지
+    # 다리 3개를 하나로 동기화 (액추에이터 1개로 동시 구동)
     equalities = "\n".join(
-        f'    <joint joint1="spoke_{p}{k}" joint2="spoke_{p}0" polycoef="0 1 0 0 0"/>'
+        f'    <joint joint1="leg_{p}{k}" joint2="leg_{p}0" polycoef="0 1 0 0 0"/>'
         for p in ("l", "r") for k in (1, 2)
     )
     return f"""<mujoco model="stair_climber_proxy">
-  <compiler angle="radian" inertiafromgeom="true"/>
-  <option timestep="0.002" integrator="implicitfast" gravity="0 0 -9.81"/>
+  <compiler angle="radian" inertiafromgeom="true" meshdir="mesh_assets"/>
+  <option timestep="0.002" integrator="implicitfast" gravity="0 0 -9.81" iterations="100" noslip_iterations="5"/>
   <statistic extent="1.6" center="{_f(STAIR_X0 + 0.5, 0, 0.4)}"/>
 
   <asset>
@@ -199,6 +307,7 @@ def build_xml(step_h: float = STEP_H) -> str:
     <texture name="grid" type="2d" builtin="checker" rgb1="0.30 0.35 0.40"
              rgb2="0.38 0.43 0.48" width="300" height="300"/>
     <material name="grid" texture="grid" texrepeat="10 10" reflectance="0.05"/>
+    <mesh name="tail_plate" file="tail.stl"/>
   </asset>
 
   <default>
@@ -216,20 +325,27 @@ def build_xml(step_h: float = STEP_H) -> str:
 
     <body name="chassis" pos="0 0 {START_Z:.4f}">
       <freejoint/>
-      <geom name="body_box" type="box" size="{_f(*CHASSIS_HALF)}"
-            mass="{CHASSIS_MASS}" rgba="0.16 0.45 0.75 1"/>
+      <!-- 상판 2장(좌우 이어붙임) + 하판 2장(좌우 이어붙임) + 기둥 8개(판 세트당 4개)
+           로 구성된 실제 샷시 구조. z=0을 상판-하판 사이 정중앙으로 둠. -->
+{_chassis_plates_and_rods()}
+      <!-- CygLiDAR (37.4 x 37.4 x 27mm) — 상판/하판 사이 중앙, 전방 정중앙 -->
+      <geom name="cyglidar_box" type="box"
+            size="{_f(LIDAR_BOX[0]/2, LIDAR_BOX[1]/2, LIDAR_BOX[2]/2)}"
+            pos="{_f(front - LIDAR_BOX[0]/2 - 0.005, 0, 0)}"
+            mass="0.03" rgba="0.15 0.15 0.15 1"/>
 
-      <!-- 꼬리: 등반 시 뒤로 넘어가는 것 방지 (수동, 저마찰). 차체 후미(-CHASSIS_HALF[0])
-           기준으로 위치 계산 — 차체 크기가 바뀌어도 자동으로 따라감 -->
-      <geom name="tail" type="capsule" size="0.012"
-            fromto="{_f(tail_x0, 0, -0.02)} {_f(tail_x1, 0, -0.04625)}"
+      <!-- 꼬리: 실제 STL 평판(160mm 폭 x 200mm 길이 x 5mm 두께). 하판 후방 중앙에 장착
+           (도면상 "샷시 하판 후방 중앙"). STL 로컬좌표: x=폭, y=길이(뒤로 뻗는 방향), z=두께.
+           Z축 +90도 회전, 폭은 중앙정렬. -->
+      <geom name="tail" type="mesh" mesh="tail_plate"
             friction="0.15 0.005 0.0001" rgba="0.3 0.3 0.3 1"/>
-      <geom name="tail_ball" type="sphere" size="0.020"
-            pos="{_f(tail_x1, 0, -0.04625)}"
-            friction="0.15 0.005 0.0001" rgba="0.2 0.2 0.2 1"/>
 
-      <!-- 3D LiDAR 격자 (실제 부품 근사: LIDAR_ROWS x LIDAR_COLS 개의 rangefinder) -->
-      <site name="imu" pos="0 0 0" size="0.008" rgba="1 1 0 0.5"/>
+      <!-- IMU 2개: 양쪽 바퀴 축 중심에 각각 장착 (차체에 고정, 바퀴 자체가 아님 —
+           베어링을 통해 축 자체는 회전하지 않으므로 차체 프레임의 site로 배치).
+           imu_l이 기존 코드 호환용 기본 센서, imu_r은 예비/이중화용으로 추가만 해둠
+           (둘 다 같은 강체(차체)에 고정돼 있어 자세값 자체는 imu_l과 동일하게 나옴). -->
+      <site name="imu_l" pos="{_f(WHEEL_X, WHEEL_Y, 0)}" size="0.008" rgba="1 1 0 0.5"/>
+      <site name="imu_r" pos="{_f(WHEEL_X, -WHEEL_Y, 0)}" size="0.008" rgba="1 0.6 0 0.5"/>
 {_lidar_sites(front)}
 
       <!-- 로봇을 따라다니는 카메라 (뷰어에서 [ ] 키로 전환) -->
@@ -248,21 +364,24 @@ def build_xml(step_h: float = STEP_H) -> str:
   <actuator>
     <motor    name="drive_l"  joint="wheel_l"  gear="1" ctrlrange="-{DRIVE_MAX_BOOST} {DRIVE_MAX_BOOST}"/>
     <motor    name="drive_r"  joint="wheel_r"  gear="1" ctrlrange="-{DRIVE_MAX_BOOST} {DRIVE_MAX_BOOST}"/>
-    <position name="deploy_l" joint="spoke_l0" kp="40" forcerange="-30 30"
-              ctrlrange="0 {DEPLOY_MAX}"/>
-    <position name="deploy_r" joint="spoke_r0" kp="40" forcerange="-30 30"
-              ctrlrange="0 {DEPLOY_MAX}"/>
+    <position name="deploy_l" joint="leg_l0" kp="40" forcerange="-30 30"
+              ctrlrange="0 {LEG_MAX_ANGLE}"/>
+    <position name="deploy_r" joint="leg_r0" kp="40" forcerange="-30 30"
+              ctrlrange="0 {LEG_MAX_ANGLE}"/>
   </actuator>
 
   <sensor>
 {_lidar_sensors()}
-    <gyro          name="imu_gyro" site="imu"/>
-    <accelerometer name="imu_acc"  site="imu"/>
-    <framequat     name="imu_quat" objtype="site" objname="imu"/>
+    <gyro          name="imu_gyro" site="imu_l"/>
+    <accelerometer name="imu_acc"  site="imu_l"/>
+    <framequat     name="imu_quat" objtype="site" objname="imu_l"/>
+    <gyro          name="imu_r_gyro" site="imu_r"/>
+    <accelerometer name="imu_r_acc"  site="imu_r"/>
+    <framequat     name="imu_r_quat" objtype="site" objname="imu_r"/>
   </sensor>
 
   <keyframe>
-    <key name="home" qpos="0 0 {START_Z:.4f} 1 0 0 0   0 0 0 0   0 0 0 0"/>
+    <key name="home" qpos="0 0 {START_Z:.4f} 1 0 0 0   0 0   0 0 0 0 0 0"/>
   </keyframe>
 </mujoco>
 """
