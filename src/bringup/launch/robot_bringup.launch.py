@@ -26,6 +26,22 @@ def generate_launch_description():
         output='screen'
     )
 
+    # ToF(근거리) 노드
+    tof_node = Node(
+        package='perception_pkg',
+        executable='tof_node',
+        name='tof_node',
+        output='screen'
+    )
+
+    # IMU 노드
+    imu_node = Node(
+        package='perception_pkg',
+        executable='imu_node',
+        name='imu_node',
+        output='screen'
+    )
+
     # FSM 노드
     mode_fsm_node = Node(
         package='control_pkg',
@@ -42,9 +58,20 @@ def generate_launch_description():
         output='screen'
     )
 
+    # 모터 드라이버 노드 (실제 하드웨어 제어)
+    motor_driver_node = Node(
+        package='motor_pkg',
+        executable='motor_driver_node',
+        name='motor_driver_node',
+        output='screen'
+    )
+
     return LaunchDescription([
         cyglidar_launch,
         sensor_fusion_node,
+        tof_node,
+        imu_node,
         mode_fsm_node,
         motor_interface_node,
+        motor_driver_node,
     ])

@@ -24,6 +24,7 @@ setup(
         'console_scripts': [
             'sensor_fusion_node = perception_pkg.sensor_fusion_node:main',
             'imu_node = perception_pkg.imu_node:main',
+            'tof_node = perception_pkg.tof_node:main',
         ],
     },
 )
