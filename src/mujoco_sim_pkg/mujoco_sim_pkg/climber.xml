@@ -1,6 +1,6 @@
 <mujoco model="stair_climber_proxy">
   <compiler angle="radian" inertiafromgeom="true" meshdir="mesh_assets"/>
-  <option timestep="0.002" integrator="implicitfast" gravity="0 0 -9.81" iterations="100" noslip_iterations="5"/>
+  <option timestep="0.001" integrator="implicitfast" gravity="0 0 -9.81" iterations="150" noslip_iterations="5" cone="elliptic"/>
   <statistic extent="1.6" center="1.6000 0.0000 0.4000"/>
 
   <asset>
@@ -10,6 +10,13 @@
              rgb2="0.38 0.43 0.48" width="300" height="300"/>
     <material name="grid" texture="grid" texrepeat="10 10" reflectance="0.05"/>
     <mesh name="tail_plate" file="tail.stl"/>
+    <mesh name="disk" file="disk.stl"/>
+    <mesh name="leg1" file="leg1.stl"/>
+    <mesh name="leg2" file="leg2.stl"/>
+    <mesh name="leg3" file="leg3.stl"/>
+    <mesh name="leg1_r" file="leg1.stl" scale="1 -1 1"/>
+    <mesh name="leg2_r" file="leg2.stl" scale="1 -1 1"/>
+    <mesh name="leg3_r" file="leg3.stl" scale="1 -1 1"/>
   </asset>
 
   <default>
@@ -30,12 +37,12 @@
       <freejoint/>
       <!-- 상판 2장(좌우 이어붙임) + 하판 2장(좌우 이어붙임) + 기둥 8개(판 세트당 4개)
            로 구성된 실제 샷시 구조. z=0을 상판-하판 사이 정중앙으로 둠. -->
-      <geom name="plate_top_l" type="box" size="0.0367 0.0688 0.0015" pos="0.0000 0.0688 0.0215" mass="0.400" rgba="0.55 0.58 0.62 1"/>
-      <geom name="plate_bottom_l" type="box" size="0.0367 0.0688 0.0015" pos="0.0000 0.0688 -0.0215" mass="0.400" rgba="0.55 0.58 0.62 1"/>
+      <geom name="plate_top_l" type="box" size="0.0367 0.0688 0.0045" pos="0.0000 0.0688 0.0245" mass="0.400" rgba="0.55 0.58 0.62 1"/>
+      <geom name="plate_bottom_l" type="box" size="0.0367 0.0688 0.0045" pos="0.0000 0.0688 -0.0245" mass="0.400" rgba="0.55 0.58 0.62 1"/>
       <geom name="rod_l_f" type="cylinder" size="0.0040 0.0200" pos="0.0250 0.0688 0.0000" mass="0.100" rgba="0.3 0.3 0.32 1"/>
       <geom name="rod_l_b" type="cylinder" size="0.0040 0.0200" pos="-0.0250 0.0688 0.0000" mass="0.100" rgba="0.3 0.3 0.32 1"/>
-      <geom name="plate_top_r" type="box" size="0.0367 0.0688 0.0015" pos="0.0000 -0.0688 0.0215" mass="0.400" rgba="0.55 0.58 0.62 1"/>
-      <geom name="plate_bottom_r" type="box" size="0.0367 0.0688 0.0015" pos="0.0000 -0.0688 -0.0215" mass="0.400" rgba="0.55 0.58 0.62 1"/>
+      <geom name="plate_top_r" type="box" size="0.0367 0.0688 0.0045" pos="0.0000 -0.0688 0.0245" mass="0.400" rgba="0.55 0.58 0.62 1"/>
+      <geom name="plate_bottom_r" type="box" size="0.0367 0.0688 0.0045" pos="0.0000 -0.0688 -0.0245" mass="0.400" rgba="0.55 0.58 0.62 1"/>
       <geom name="rod_r_f" type="cylinder" size="0.0040 0.0200" pos="0.0250 -0.0688 0.0000" mass="0.100" rgba="0.3 0.3 0.32 1"/>
       <geom name="rod_r_b" type="cylinder" size="0.0040 0.0200" pos="-0.0250 -0.0688 0.0000" mass="0.100" rgba="0.3 0.3 0.32 1"/>
       <!-- CygLiDAR (37.4 x 37.4 x 27mm) — 상판/하판 사이 중앙, 전방 정중앙 -->
@@ -44,9 +51,7 @@
             pos="0.0130 0.0000 0.0000"
             mass="0.03" rgba="0.15 0.15 0.15 1"/>
 
-      <!-- 꼬리: 실제 STL 평판(160mm 폭 x 200mm 길이 x 5mm 두께). 하판 후방 중앙에 장착
-           (도면상 "샷시 하판 후방 중앙"). STL 로컬좌표: x=폭, y=길이(뒤로 뻗는 방향), z=두께.
-           Z축 +90도 회전, 폭은 중앙정렬. -->
+      <!-- 꼬리: 실제 STL 평판(160mm 폭 x 200mm 길이 x 5mm 두께). 하판 후방 중앙에 장착. -->
       <geom name="tail" type="mesh" mesh="tail_plate"
             friction="0.15 0.005 0.0001" rgba="0.3 0.3 0.3 1"/>
 
@@ -54,8 +59,8 @@
            베어링을 통해 축 자체는 회전하지 않으므로 차체 프레임의 site로 배치).
            imu_l이 기존 코드 호환용 기본 센서, imu_r은 예비/이중화용으로 추가만 해둠
            (둘 다 같은 강체(차체)에 고정돼 있어 자세값 자체는 imu_l과 동일하게 나옴). -->
-      <site name="imu_l" pos="0.0240 0.1600 0.0000" size="0.008" rgba="1 1 0 0.5"/>
-      <site name="imu_r" pos="0.0240 -0.1600 0.0000" size="0.008" rgba="1 0.6 0 0.5"/>
+      <site name="imu_l" pos="0.0240 0.1406 0.0000" size="0.008" rgba="1 1 0 0.5"/>
+      <site name="imu_r" pos="0.0240 -0.1406 0.0000" size="0.008" rgba="1 0.6 0 0.5"/>
       <site name="lidar_0_0" pos="0.0387 0.0000 0.0000" zaxis="0.8652 -0.4995 -0.0436" size="0.005" rgba="0 1 1 0.35"/>
       <site name="lidar_0_1" pos="0.0387 0.0000 0.0000" zaxis="0.9650 -0.2586 -0.0436" size="0.005" rgba="0 1 1 0.35"/>
       <site name="lidar_0_2" pos="0.0387 0.0000 0.0000" zaxis="0.9990 0.0000 -0.0436" size="0.005" rgba="0 1 1 0.35"/>
@@ -86,107 +91,80 @@
       <camera name="follow" mode="trackcom" pos="0 -2.2 0.75"
               xyaxes="1 0 0 0 0.32 0.95"/>
 
-      <body name="wheel_l" pos="0.0240 0.1600 0.0000">
+      <body name="wheel_l" pos="0.0240 0.1406 0.0000">
         <joint name="wheel_l" type="hinge" axis="0 1 0"
-               damping="0.05" armature="0.002"/>
-        <geom name="hub_l" type="cylinder" size="0.0450 0.0220"
-              zaxis="0 1 0" mass="0.30" friction="1.0 0.005 0.0001"
-              rgba="0.25 0.28 0.33 1"/>
-        <geom type="capsule" size="0.0050" fromto="0 0.0300 0 0.0290 0.0300 0.0000" rgba="0.35 0.38 0.42 1"/><geom type="capsule" size="0.0050" fromto="0 0.0300 0 -0.0145 0.0300 0.0251" rgba="0.35 0.38 0.42 1"/><geom type="capsule" size="0.0050" fromto="0 0.0300 0 -0.0145 0.0300 -0.0251" rgba="0.35 0.38 0.42 1"/><geom type="capsule" size="0.0015" fromto="0.0077 0.0300 0.0110 0.0220 0.0300 0.0314" rgba="0.15 0.7 0.15 0.5" contype="0" conaffinity="0"/><geom type="capsule" size="0.0015" fromto="-0.0133 0.0300 0.0012 -0.0382 0.0300 0.0033" rgba="0.15 0.7 0.15 0.5" contype="0" conaffinity="0"/><geom type="capsule" size="0.0015" fromto="0.0057 0.0300 -0.0121 0.0162 0.0300 -0.0348" rgba="0.15 0.7 0.15 0.5" contype="0" conaffinity="0"/>
-        <body name="leg_l0" pos="0.0290 0.0300 0.0000">
-          <joint name="leg_l0" type="hinge" axis="0 1 0" range="0 1.7453292519943295"
+               damping="0.15" armature="0.006"/>
+        <geom name="hub_l" type="mesh" mesh="disk" mass="0.30"
+              friction="1.0 0.005 0.0001" rgba="0.25 0.28 0.33 1"/>
+        
+        <body name="leg_l1" pos="-0.0135 0.0038 0.0195">
+          <joint name="leg_l1" type="hinge" axis="0 -1 0" range="0 0.5061454830783556"
                  damping="0.3" armature="0.001"/>
-          <geom class="spoke" size="0.0040"
-                fromto="0 0 0 0.0021 0.0000 -0.0239"/>
-          <geom class="spoke" size="0.0040" fromto="0.0021 0.0000 -0.0239 -0.0016 0.0000 -0.0350"/>
-          <geom class="spoke" size="0.0040" fromto="-0.0016 0.0000 -0.0350 -0.0134 0.0000 -0.0413"/>
-          <geom class="spoke" size="0.0040" fromto="-0.0134 0.0000 -0.0413 -0.0296 0.0000 -0.0387"/>
-          <geom type="sphere" size="0.004" pos="0.0021 0.0000 -0.0239"
-                rgba="0.1 0.6 0.9 1" contype="0" conaffinity="0"/>
+          <geom type="mesh" mesh="leg1" class="spoke"/>
         </body>
-        <body name="leg_l1" pos="-0.0145 0.0300 0.0251">
-          <joint name="leg_l1" type="hinge" axis="0 1 0" range="0 1.7453292519943295"
+        <body name="leg_l2" pos="0.0237 0.0038 0.0020">
+          <joint name="leg_l2" type="hinge" axis="0 -1 0" range="0 0.5061454830783556"
                  damping="0.3" armature="0.001"/>
-          <geom class="spoke" size="0.0040"
-                fromto="0 0 0 0.0197 0.0000 0.0138"/>
-          <geom class="spoke" size="0.0040" fromto="0.0197 0.0000 0.0138 0.0311 0.0000 0.0161"/>
-          <geom class="spoke" size="0.0040" fromto="0.0311 0.0000 0.0161 0.0425 0.0000 0.0090"/>
-          <geom class="spoke" size="0.0040" fromto="0.0425 0.0000 0.0090 0.0483 0.0000 -0.0063"/>
-          <geom type="sphere" size="0.004" pos="0.0197 0.0000 0.0138"
-                rgba="0.1 0.6 0.9 1" contype="0" conaffinity="0"/>
+          <geom type="mesh" mesh="leg2" class="spoke"/>
         </body>
-        <body name="leg_l2" pos="-0.0145 0.0300 -0.0251">
-          <joint name="leg_l2" type="hinge" axis="0 1 0" range="0 1.7453292519943295"
+        <body name="leg_l3" pos="-0.0101 0.0038 -0.0215">
+          <joint name="leg_l3" type="hinge" axis="0 -1 0" range="0 0.5061454830783556"
                  damping="0.3" armature="0.001"/>
-          <geom class="spoke" size="0.0040"
-                fromto="0 0 0 -0.0218 0.0000 0.0101"/>
-          <geom class="spoke" size="0.0040" fromto="-0.0218 0.0000 0.0101 -0.0295 0.0000 0.0189"/>
-          <geom class="spoke" size="0.0040" fromto="-0.0295 0.0000 0.0189 -0.0291 0.0000 0.0323"/>
-          <geom class="spoke" size="0.0040" fromto="-0.0291 0.0000 0.0323 -0.0187 0.0000 0.0450"/>
-          <geom type="sphere" size="0.004" pos="-0.0218 0.0000 0.0101"
-                rgba="0.1 0.6 0.9 1" contype="0" conaffinity="0"/>
+          <geom type="mesh" mesh="leg3" class="spoke"/>
         </body>
       </body>
 
-      <body name="wheel_r" pos="0.0240 -0.1600 0.0000">
+      <body name="wheel_r" pos="0.0240 -0.1406 0.0000">
         <joint name="wheel_r" type="hinge" axis="0 1 0"
-               damping="0.05" armature="0.002"/>
-        <geom name="hub_r" type="cylinder" size="0.0450 0.0220"
-              zaxis="0 1 0" mass="0.30" friction="1.0 0.005 0.0001"
-              rgba="0.25 0.28 0.33 1"/>
-        <geom type="capsule" size="0.0050" fromto="0 -0.0300 0 0.0290 -0.0300 0.0000" rgba="0.35 0.38 0.42 1"/><geom type="capsule" size="0.0050" fromto="0 -0.0300 0 -0.0145 -0.0300 0.0251" rgba="0.35 0.38 0.42 1"/><geom type="capsule" size="0.0050" fromto="0 -0.0300 0 -0.0145 -0.0300 -0.0251" rgba="0.35 0.38 0.42 1"/><geom type="capsule" size="0.0015" fromto="0.0077 -0.0300 0.0110 0.0220 -0.0300 0.0314" rgba="0.15 0.7 0.15 0.5" contype="0" conaffinity="0"/><geom type="capsule" size="0.0015" fromto="-0.0133 -0.0300 0.0012 -0.0382 -0.0300 0.0033" rgba="0.15 0.7 0.15 0.5" contype="0" conaffinity="0"/><geom type="capsule" size="0.0015" fromto="0.0057 -0.0300 -0.0121 0.0162 -0.0300 -0.0348" rgba="0.15 0.7 0.15 0.5" contype="0" conaffinity="0"/>
-        <body name="leg_r0" pos="0.0290 -0.0300 0.0000">
-          <joint name="leg_r0" type="hinge" axis="0 1 0" range="0 1.7453292519943295"
+               damping="0.15" armature="0.006"/>
+        <geom name="hub_r" type="mesh" mesh="disk" mass="0.30"
+              friction="1.0 0.005 0.0001" rgba="0.25 0.28 0.33 1"/>
+        
+        <body name="leg_r1" pos="-0.0135 -0.0038 0.0195">
+          <joint name="leg_r1" type="hinge" axis="0 -1 0" range="0 0.5061454830783556"
                  damping="0.3" armature="0.001"/>
-          <geom class="spoke" size="0.0040"
-                fromto="0 0 0 0.0021 0.0000 -0.0239"/>
-          <geom class="spoke" size="0.0040" fromto="0.0021 0.0000 -0.0239 -0.0016 0.0000 -0.0350"/>
-          <geom class="spoke" size="0.0040" fromto="-0.0016 0.0000 -0.0350 -0.0134 0.0000 -0.0413"/>
-          <geom class="spoke" size="0.0040" fromto="-0.0134 0.0000 -0.0413 -0.0296 0.0000 -0.0387"/>
-          <geom type="sphere" size="0.004" pos="0.0021 0.0000 -0.0239"
-                rgba="0.1 0.6 0.9 1" contype="0" conaffinity="0"/>
+          <geom type="mesh" mesh="leg1_r" class="spoke"/>
         </body>
-        <body name="leg_r1" pos="-0.0145 -0.0300 0.0251">
-          <joint name="leg_r1" type="hinge" axis="0 1 0" range="0 1.7453292519943295"
+        <body name="leg_r2" pos="0.0237 -0.0038 0.0020">
+          <joint name="leg_r2" type="hinge" axis="0 -1 0" range="0 0.5061454830783556"
                  damping="0.3" armature="0.001"/>
-          <geom class="spoke" size="0.0040"
-                fromto="0 0 0 0.0197 0.0000 0.0138"/>
-          <geom class="spoke" size="0.0040" fromto="0.0197 0.0000 0.0138 0.0311 0.0000 0.0161"/>
-          <geom class="spoke" size="0.0040" fromto="0.0311 0.0000 0.0161 0.0425 0.0000 0.0090"/>
-          <geom class="spoke" size="0.0040" fromto="0.0425 0.0000 0.0090 0.0483 0.0000 -0.0063"/>
-          <geom type="sphere" size="0.004" pos="0.0197 0.0000 0.0138"
-                rgba="0.1 0.6 0.9 1" contype="0" conaffinity="0"/>
+          <geom type="mesh" mesh="leg2_r" class="spoke"/>
         </body>
-        <body name="leg_r2" pos="-0.0145 -0.0300 -0.0251">
-          <joint name="leg_r2" type="hinge" axis="0 1 0" range="0 1.7453292519943295"
+        <body name="leg_r3" pos="-0.0101 -0.0038 -0.0215">
+          <joint name="leg_r3" type="hinge" axis="0 -1 0" range="0 0.5061454830783556"
                  damping="0.3" armature="0.001"/>
-          <geom class="spoke" size="0.0040"
-                fromto="0 0 0 -0.0218 0.0000 0.0101"/>
-          <geom class="spoke" size="0.0040" fromto="-0.0218 0.0000 0.0101 -0.0295 0.0000 0.0189"/>
-          <geom class="spoke" size="0.0040" fromto="-0.0295 0.0000 0.0189 -0.0291 0.0000 0.0323"/>
-          <geom class="spoke" size="0.0040" fromto="-0.0291 0.0000 0.0323 -0.0187 0.0000 0.0450"/>
-          <geom type="sphere" size="0.004" pos="-0.0218 0.0000 0.0101"
-                rgba="0.1 0.6 0.9 1" contype="0" conaffinity="0"/>
+          <geom type="mesh" mesh="leg3_r" class="spoke"/>
         </body>
       </body>
     </body>
   </worldbody>
 
+  <!-- 같은 바퀴의 다리끼리는 충돌 계산 제외 — 실제로는 볼트로 결합되는
+       부분이라 메시가 서로 겹쳐있는 게 정상(부품 경계에서 살짝 겹침) -->
+  <contact>
+    <exclude body1="leg_l1" body2="leg_l2"/>
+    <exclude body1="leg_l1" body2="leg_l3"/>
+    <exclude body1="leg_l2" body2="leg_l3"/>
+    <exclude body1="leg_r1" body2="leg_r2"/>
+    <exclude body1="leg_r1" body2="leg_r3"/>
+    <exclude body1="leg_r2" body2="leg_r3"/>
+  </contact>
+
   <!-- 스포크 3개를 기계적으로 연동: 액추에이터 1개로 동시에 개폐 -->
   <equality>
-    <joint joint1="leg_l1" joint2="leg_l0" polycoef="0 1 0 0 0"/>
-    <joint joint1="leg_l2" joint2="leg_l0" polycoef="0 1 0 0 0"/>
-    <joint joint1="leg_r1" joint2="leg_r0" polycoef="0 1 0 0 0"/>
-    <joint joint1="leg_r2" joint2="leg_r0" polycoef="0 1 0 0 0"/>
+    <joint joint1="leg_l2" joint2="leg_l1" polycoef="0 1 0 0 0"/>
+    <joint joint1="leg_l3" joint2="leg_l1" polycoef="0 1 0 0 0"/>
+    <joint joint1="leg_r2" joint2="leg_r1" polycoef="0 1 0 0 0"/>
+    <joint joint1="leg_r3" joint2="leg_r1" polycoef="0 1 0 0 0"/>
   </equality>
 
   <actuator>
     <motor    name="drive_l"  joint="wheel_l"  gear="1" ctrlrange="-12.0 12.0"/>
     <motor    name="drive_r"  joint="wheel_r"  gear="1" ctrlrange="-12.0 12.0"/>
-    <position name="deploy_l" joint="leg_l0" kp="40" forcerange="-30 30"
-              ctrlrange="0 1.7453292519943295"/>
-    <position name="deploy_r" joint="leg_r0" kp="40" forcerange="-30 30"
-              ctrlrange="0 1.7453292519943295"/>
+    <position name="deploy_l" joint="leg_l1" kp="40" forcerange="-30 30"
+              ctrlrange="0 0.5061454830783556"/>
+    <position name="deploy_r" joint="leg_r1" kp="40" forcerange="-30 30"
+              ctrlrange="0 0.5061454830783556"/>
   </actuator>
 
   <sensor>

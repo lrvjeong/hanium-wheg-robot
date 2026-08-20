@@ -71,7 +71,7 @@ def main():
     print(f"모델 로드: {args.model}")
     model = SAC.load(args.model)
 
-    env = WhegEnv(randomize_terrain=True, domain_randomize=False)
+    env = WhegEnv()
 
     print("정책 실행 중 (뷰어 없이 먼저 전체 궤적 계산)...")
     episodes = collect_episodes(model, env, args.episodes, args.deterministic)

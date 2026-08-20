@@ -41,42 +41,13 @@ LIDAR_MAX_RANGE  = 2.5    # 최대 인식거리 [m] (부품 스펙에 맞춰 조
 # --- 바퀴 / 스포크 ---
 HUB_R      = 0.045  # 바퀴 허브 반지름 [m] — 실제 로봇 디스크 반지름(45mm)과 일치.
                      # 무변형으로 2cm까지는 통과 가능(HUB_R > 2cm 여유)
-HUB_HALF_T = 0.022  # 허브 원판 반두께 [m]
-ARC_R      = 0.065  # 스포크 호의 반지름 — 훅 전개 시 5cm 단차까지 닿을 수 있는 여유 반영
-ARC_SPAN   = math.radians(95)   # 스포크 호가 덮는 각도
-ARC_SEGMENTS = 5    # 호를 근사하는 캡슐 개수 (기존 2 → 부드러운 곡선을 위해 증가)
-SPOKE_RAD = 0.004  # 훅 굵기 [m] — 실측 STL(다리/스포크 부품, 두께 8mm) 그대로
-                    # 반영. 캡슐 size는 반지름이라 8mm 두께 = 반지름 4mm.
-                    # 밑동-끝 테이퍼는 실측 근거 없는 임의 추가였어서 제거,
-                    # 실제 부품처럼 두께 균일하게 처리.
-ARC_DIR    = +1     # 훅이 감기는 방향. 등반 시 갈고리가 계단에 안 걸리면 -1로!
+HUB_HALF_T = 0.003  # 허브 원판 반두께 [m] — 실측 STL 기준(디스크 두께 6mm)
+SPOKE_RAD = 0.004  # 훅 굵기 [m] — 실측 STL(다리/스포크 부품, 두께 8mm) 그대로 반영.
+                    # 캡슐 size는 반지름이라 8mm 두께 = 반지름 4mm.
 
-# --- 홈-슬라이더(슬라이더-크랭크) 메커니즘 ---
-# 실제 구조: 디스크의 직선 홈을 따라 슬라이더(핀)가 움직이면, 별도 고정 피벗에
-# 달린 다리가 링크로 연결되어 수동으로 회전(열림/닫힘)함. 정확한 홈 각도·링크
-# 길이는 실측값이 없어서, MuJoCo에서 직접 시뮬레이션 검증(막힘/특이점 없이
-# 매끄럽게 0~120도 넘게 움직이는 조합)을 거쳐 확정한 값입니다.
-PIVOT_R      = 0.029              # 다리 고정 피벗 반지름 (실측: 원주에서 16mm 안쪽)
-GROOVE_THETA = math.radians(55)   # 홈(그루브) 방향 — 피벗 각도 기준 오프셋
-LINK_LEN     = 0.024              # 피벗~커플러(슬라이더 연결점) 링크 길이
-LEG_BETA     = math.radians(275)  # 다리 초기(접힘) 방향 — 접힘 시 허브 반지름
-                                   # 안쪽으로 들어오도록 재계산 (기존 30도는 접힌
-                                   # 상태에서도 훅이 32mm나 더 튀어나와 바닥에
-                                   # 걸리며 바퀴가 안 굴러가는 원인이었음)
-SLIDE_R0     = 0.03839            # 슬라이더 기준 반경(qpos=0일 때, 다리 거의 접힘)
-SLIDE_MIN    = -0.025             # 슬라이더 이동범위 하한 [m] (시각 장식용)
-SLIDE_MAX    = 0.0                # 슬라이더 이동범위 상한 [m] (시각 장식용)
-LEG_MAX_ANGLE = math.radians(100) # 다리 힌지 최대 회전각 — 직접 구동, 실측 전 가정값
-BRACKET_RAD   = 0.005             # 중앙 브래킷(고정 팔) 굵기 [m] — 가정값
-HOOK_LEN     = 0.035              # 커플러 지점 너머 갈고리 곡선 길이 [m] (실측 다리 전체
-                                   # 길이 ~60mm에서 LINK_LEN을 뺀 나머지 반영)
-HOOK_CURVE   = math.radians(70)   # 갈고리가 안쪽으로 말리는 각도
-
-DEPLOY_MAX = 1.85   # 스포크 전개 각도 [rad] (~106도) — 현재 미사용(참고용, 실제 범위는 SLIDE_MIN/MAX)
 WHEEL_X    = 0.024  # 차체 기준 바퀴 축 위치 (앞쪽 +x, 축소된 전후길이(73.5mm)에 비례 조정)
-WHEEL_Y    = 0.160  # 차체 중심에서 바퀴까지 좌우 거리 — 전체 좌우폭 절반(137.6mm)
-                     # + 바퀴두께(HUB_HALF_T 22mm)로 계산, 바퀴 안쪽면이 판 바깥면에 딱 붙도록
-SPOKE_YOFF = 0.030  # 스포크를 허브 바깥면 쪽으로 빼는 오프셋 (허브 두께에 맞춰 조정)
+WHEEL_Y    = 0.1406 # 차체 중심에서 바퀴까지 좌우 거리 — 전체 좌우폭 절반(137.6mm)
+                     # + 디스크 반두께(3mm, 실측)로 계산, 바퀴 안쪽면이 판 바깥면에 딱 붙도록
 
 # --- 차체 / 구동 ---
 # 차체 = 상판+하판 두 장 + 그 사이를 잇는 쇠막대 기둥 4개 (단일 박스 아님)
@@ -86,7 +57,7 @@ PLATE_LEN    = 0.0735   # 판 1장의 전후 길이(X) [m] — 도면 73.5mm
 PLATE_WID_1  = 0.1376   # 판 1장의 좌우 폭(Y) [m] — 도면 137.6mm
 PLATE_GAP    = 0.0      # 두 판을 이어붙일 때 사이 틈 [m] — 맞닿는다고 가정(0)
 PLATE_WID    = PLATE_WID_1 * 2 + PLATE_GAP  # 상판/하판 전체 폭(판 2장 이어붙인 길이)
-PLATE_THICK  = 0.003    # 판 두께 [m] — 가정값 (미도시)
+PLATE_THICK  = 0.009    # 판 두께 [m] — 실측 STL(샷시.STL) 기준, 기존 3mm는 가정값이었음
 ROD_HEIGHT   = 0.04     # 상판-하판 간격(기둥 높이) [m] — "약 4cm" 명시대로
 ROD_RADIUS   = 0.004    # 기둥(쇠막대) 반지름 [m] — 가정값 (3/8" 볼트 구멍 기준 추정)
 ROD_X_OFF    = 0.025    # 기둥 x위치(판 1장 내부, 중심 기준 대칭) [m] — 가정값
@@ -100,101 +71,59 @@ LIDAR_BOX = (0.0374, 0.0374, 0.027)  # (가로, 세로, 높이) [m]
 DRIVE_MAX    = 5.0                  # 바퀴 모터 최대 토크 [N·m] — 평지 주행/등반 시 기본값
 DRIVE_MAX_BOOST = 12.0              # 고토크 모드 최대 토크 [N·m] — 1~2cm 무변형 단차를
                                      # 스포크 전개 없이 힘으로 밀고 올라갈 때 사용
-START_Z      = 0.050                # 초기 차체 높이 (HUB_R=0.045에 맞춰 재조정 — 바퀴가 딱 지면에 닿도록)
+START_Z      = 0.050                # 초기 차체 높이 — 디스크 반지름(45mm) 기준.
+                                     # 평지에서는 디스크가 땅에 닿아 구르고,
+                                     # 단차 만났을 때만 스포크가 펼쳐짐.
 
 # ============================================================
 def _f(*vals):
     return " ".join(f"{v:.4f}" for v in vals)
 
 
-def _leg_slider_body(prefix: str, k: int, y_off: float) -> str:
-    """다리 1개를 XML로 생성. 회전힌지로 서보가 직접 구동(안정적, 검증됨).
+# 실측 STL에서 뽑은 다리 피벗 위치 (디스크 중심 기준, m)
+# 실측 STL에서 뽑은 다리 피벗 위치 (디스크 중심 기준, m)
+LEG_PIVOTS = {
+    1: (-0.01354, 0.00280, 0.01946),
+    2: (0.02366, 0.00280, 0.00199),
+    3: (-0.01006, 0.00280, -0.02149),
+}
+LEG_MAX_ANGLE = math.radians(29)  # 실제 메시로 검증된 최대 회전각(28.6도 근처에서
+                                   # 최대로 펼쳐지고, 그 이후는 다시 오므라듦)
+LEG_YOFF = 0.001  # 다리 메시를 디스크보다 살짝 바깥쪽으로 — 안 밀면 차체 판과 겹침
 
-    '핀(파란 구슬)'은 별도 몸체가 아니라 다리(주황 스포크) 자신의 커플러
-    지점(훅이 시작되는 곳)에 그냥 얹힌 장식용 geom으로 처리함 — 이러면
-    핀이 실제로 스포크에 붙어서 같이 움직이는 게 시각적으로 명확해짐.
-    다만 다리가 회전하면 이 점은 피벗을 중심으로 호(원)를 그리며 움직이지,
-    초록색 홈 직선을 따라 미끄러지듯 움직이진 않음 — 그렇게 하려면 진짜
-    슬라이더-크랭크 폐루프 물리가 필요한데, 실측 없이는 계속 특이점에
-    걸려서(여러 조합 실제 검증 반복) 안정적인 방식으로 단순화한 것.
-    """
-    phi = 2.0 * math.pi * k / 3.0
-    px, pz = PIVOT_R * math.cos(phi), PIVOT_R * math.sin(phi)
 
-    beta_abs = phi + ARC_DIR * LEG_BETA
-    link_x = LINK_LEN * math.cos(beta_abs)
-    link_z = LINK_LEN * math.sin(beta_abs)
-
+def _leg_mesh_body(prefix: str, k: int, side: int) -> str:
+    """다리 1개 — 실측 STL(leg1/2/3.stl) 그대로 사용. 오른쪽 바퀴는 Y축
+    반전된 메시(leg{k}_r) 사용 — 미러링 없이 동일 메시를 양쪽에 쓰면
+    오른쪽 다리가 반대 방향으로 튀어나와 차체 판과 심하게 간섭/잠기는
+    문제가 실제로 확인됨 (미러링이 시각적 취향이 아니라 기능적으로 필수).
+    남아있는 근소한 좌우 비대칭(주행 시 약간의 드리프트)은 접촉 계산의
+    미세한 비선형성에서 오는 것으로 보이며, 실제 로봇도 완벽 대칭은
+    아니므로 정책이 IMU 피드백으로 스스로 보정하도록 두는 게 합리적임."""
+    px, py, pz = LEG_PIVOTS[k]
     leg_name = f"leg_{prefix}{k}"
-
-    # 갈고리처럼 안쪽으로 말리는 곡선 3세그먼트
-    n_hook = 3
-    hook_geoms = []
-    prev_x, prev_z = link_x, link_z
-    for i in range(1, n_hook + 1):
-        t = i / n_hook
-        ang = beta_abs - ARC_DIR * HOOK_CURVE * t
-        seg_len = HOOK_LEN * t
-        hx = link_x + seg_len * math.cos(ang)
-        hz = link_z + seg_len * math.sin(ang)
-        hook_geoms.append(
-            f'<geom class="spoke" size="{SPOKE_RAD:.4f}" '
-            f'fromto="{_f(prev_x, 0, prev_z)} {_f(hx, 0, hz)}"/>'
-        )
-        prev_x, prev_z = hx, hz
-    hook_xml = "\n          ".join(hook_geoms)
-
+    mesh_name = f"leg{k}" if prefix == "l" else f"leg{k}_r"
+    py_use = (py if prefix == "l" else -py) + side * LEG_YOFF
     return f"""
-        <body name="{leg_name}" pos="{_f(px, y_off, pz)}">
-          <joint name="{leg_name}" type="hinge" axis="0 1 0" range="0 {LEG_MAX_ANGLE}"
+        <body name="{leg_name}" pos="{_f(px, py_use, pz)}">
+          <joint name="{leg_name}" type="hinge" axis="0 -1 0" range="0 {LEG_MAX_ANGLE}"
                  damping="0.3" armature="0.001"/>
-          <geom class="spoke" size="{SPOKE_RAD:.4f}"
-                fromto="0 0 0 {_f(link_x, 0, link_z)}"/>
-          {hook_xml}
-          <geom type="sphere" size="0.004" pos="{_f(link_x, 0, link_z)}"
-                rgba="0.1 0.6 0.9 1" contype="0" conaffinity="0"/>
+          <geom type="mesh" mesh="{mesh_name}" class="spoke"/>
         </body>"""
 
 
-def _groove_visual(k: int, y_off: float) -> str:
-    """디스크에 파인 홈(그루브)을 시각적으로 표시 (충돌 없음, 장식용)."""
-    phi = 2.0 * math.pi * k / 3.0
-    gtheta_abs = phi + ARC_DIR * GROOVE_THETA
-    r_a = SLIDE_R0 + SLIDE_MIN
-    r_b = SLIDE_R0 + SLIDE_MAX
-    x0, z0 = r_a * math.cos(gtheta_abs), r_a * math.sin(gtheta_abs)
-    x1, z1 = r_b * math.cos(gtheta_abs), r_b * math.sin(gtheta_abs)
-    return (f'<geom type="capsule" size="0.0015" '
-            f'fromto="{_f(x0, y_off, z0)} {_f(x1, y_off, z1)}" '
-            f'rgba="0.15 0.7 0.15 0.5" contype="0" conaffinity="0"/>')
-
-
-def _bracket_arm(k: int, y_off: float) -> str:
-    """중앙 브래킷(스포크 팔): 디스크 중심에서 다리 피벗 지점까지 이어지는
-    고정된(회전하지 않는, 디스크와 함께 도는) 팔. 실제 CAD 이미지처럼
-    다리가 허브 림에서 바로 튀어나오는 게 아니라, 이 중앙 브래킷 끝의
-    핀(피벗)에서 회전하도록 시각적 구조를 맞춤."""
-    phi = 2.0 * math.pi * k / 3.0
-    px, pz = PIVOT_R * math.cos(phi), PIVOT_R * math.sin(phi)
-    return (f'<geom type="capsule" size="{BRACKET_RAD:.4f}" '
-            f'fromto="0 {y_off:.4f} 0 {_f(px, y_off, pz)}" '
-            f'rgba="0.35 0.38 0.42 1"/>')
-
-
 def _wheel(prefix: str, side: int) -> str:
-    """변신 바퀴 1개. side: 왼쪽 +1 / 오른쪽 -1 (스포크 오프셋 방향만 다름)"""
+    """변신 바퀴 1개 — 실측 STL(disk.stl, leg1/2/3.stl) 그대로 조립.
+    좌우 바퀴에 동일한 다리 메시(미러링 없음) 사용."""
     y = side * WHEEL_Y
-    legs = "".join(_leg_slider_body(prefix, k, side * SPOKE_YOFF) for k in range(3))
-    grooves = "".join(_groove_visual(k, side * SPOKE_YOFF) for k in range(3))
-    brackets = "".join(_bracket_arm(k, side * SPOKE_YOFF) for k in range(3))
+    legs = "".join(_leg_mesh_body(prefix, k, side) for k in (1, 2, 3))
     return f"""
       <body name="wheel_{prefix}" pos="{_f(WHEEL_X, y, 0)}">
         <joint name="wheel_{prefix}" type="hinge" axis="0 1 0"
-               damping="0.05" armature="0.002"/>
-        <geom name="hub_{prefix}" type="cylinder" size="{_f(HUB_R, HUB_HALF_T)}"
-              zaxis="0 1 0" mass="0.30" friction="1.0 0.005 0.0001"
-              rgba="0.25 0.28 0.33 1"/>
-        {brackets}{grooves}{legs}
+               damping="0.15" armature="0.006"/>
+        <geom name="hub_{prefix}" type="mesh" mesh="disk" mass="0.30"
+              friction="1.0 0.005 0.0001" rgba="0.25 0.28 0.33 1"/>
+        {legs}
       </body>"""
 
 
@@ -293,12 +222,12 @@ def build_xml(step_h: float = STEP_H) -> str:
     rear = -CHASSIS_HALF[0]
     # 다리 3개를 하나로 동기화 (액추에이터 1개로 동시 구동)
     equalities = "\n".join(
-        f'    <joint joint1="leg_{p}{k}" joint2="leg_{p}0" polycoef="0 1 0 0 0"/>'
-        for p in ("l", "r") for k in (1, 2)
+        f'    <joint joint1="leg_{p}{k}" joint2="leg_{p}1" polycoef="0 1 0 0 0"/>'
+        for p in ("l", "r") for k in (2, 3)
     )
     return f"""<mujoco model="stair_climber_proxy">
   <compiler angle="radian" inertiafromgeom="true" meshdir="mesh_assets"/>
-  <option timestep="0.002" integrator="implicitfast" gravity="0 0 -9.81" iterations="100" noslip_iterations="5"/>
+  <option timestep="0.001" integrator="implicitfast" gravity="0 0 -9.81" iterations="150" noslip_iterations="5" cone="elliptic"/>
   <statistic extent="1.6" center="{_f(STAIR_X0 + 0.5, 0, 0.4)}"/>
 
   <asset>
@@ -308,6 +237,13 @@ def build_xml(step_h: float = STEP_H) -> str:
              rgb2="0.38 0.43 0.48" width="300" height="300"/>
     <material name="grid" texture="grid" texrepeat="10 10" reflectance="0.05"/>
     <mesh name="tail_plate" file="tail.stl"/>
+    <mesh name="disk" file="disk.stl"/>
+    <mesh name="leg1" file="leg1.stl"/>
+    <mesh name="leg2" file="leg2.stl"/>
+    <mesh name="leg3" file="leg3.stl"/>
+    <mesh name="leg1_r" file="leg1.stl" scale="1 -1 1"/>
+    <mesh name="leg2_r" file="leg2.stl" scale="1 -1 1"/>
+    <mesh name="leg3_r" file="leg3.stl" scale="1 -1 1"/>
   </asset>
 
   <default>
@@ -334,9 +270,7 @@ def build_xml(step_h: float = STEP_H) -> str:
             pos="{_f(front - LIDAR_BOX[0]/2 - 0.005, 0, 0)}"
             mass="0.03" rgba="0.15 0.15 0.15 1"/>
 
-      <!-- 꼬리: 실제 STL 평판(160mm 폭 x 200mm 길이 x 5mm 두께). 하판 후방 중앙에 장착
-           (도면상 "샷시 하판 후방 중앙"). STL 로컬좌표: x=폭, y=길이(뒤로 뻗는 방향), z=두께.
-           Z축 +90도 회전, 폭은 중앙정렬. -->
+      <!-- 꼬리: 실제 STL 평판(160mm 폭 x 200mm 길이 x 5mm 두께). 하판 후방 중앙에 장착. -->
       <geom name="tail" type="mesh" mesh="tail_plate"
             friction="0.15 0.005 0.0001" rgba="0.3 0.3 0.3 1"/>
 
@@ -356,6 +290,17 @@ def build_xml(step_h: float = STEP_H) -> str:
     </body>
   </worldbody>
 
+  <!-- 같은 바퀴의 다리끼리는 충돌 계산 제외 — 실제로는 볼트로 결합되는
+       부분이라 메시가 서로 겹쳐있는 게 정상(부품 경계에서 살짝 겹침) -->
+  <contact>
+    <exclude body1="leg_l1" body2="leg_l2"/>
+    <exclude body1="leg_l1" body2="leg_l3"/>
+    <exclude body1="leg_l2" body2="leg_l3"/>
+    <exclude body1="leg_r1" body2="leg_r2"/>
+    <exclude body1="leg_r1" body2="leg_r3"/>
+    <exclude body1="leg_r2" body2="leg_r3"/>
+  </contact>
+
   <!-- 스포크 3개를 기계적으로 연동: 액추에이터 1개로 동시에 개폐 -->
   <equality>
 {equalities}
@@ -364,9 +309,9 @@ def build_xml(step_h: float = STEP_H) -> str:
   <actuator>
     <motor    name="drive_l"  joint="wheel_l"  gear="1" ctrlrange="-{DRIVE_MAX_BOOST} {DRIVE_MAX_BOOST}"/>
     <motor    name="drive_r"  joint="wheel_r"  gear="1" ctrlrange="-{DRIVE_MAX_BOOST} {DRIVE_MAX_BOOST}"/>
-    <position name="deploy_l" joint="leg_l0" kp="40" forcerange="-30 30"
+    <position name="deploy_l" joint="leg_l1" kp="40" forcerange="-30 30"
               ctrlrange="0 {LEG_MAX_ANGLE}"/>
-    <position name="deploy_r" joint="leg_r0" kp="40" forcerange="-30 30"
+    <position name="deploy_r" joint="leg_r1" kp="40" forcerange="-30 30"
               ctrlrange="0 {LEG_MAX_ANGLE}"/>
   </actuator>
 
@@ -401,7 +346,10 @@ def main():
     import mujoco
     import mujoco.viewer
     model = mujoco.MjModel.from_xml_string(xml)
-    mujoco.viewer.launch(model)
+    data = mujoco.MjData(model)
+    mujoco.mj_resetDataKeyframe(model, data, 0)  # home keyframe 적용 (안 하면 z=0에서 시작해 땅에 파묻힘)
+    mujoco.mj_forward(model, data)
+    mujoco.viewer.launch(model, data)
 
 
 if __name__ == "__main__":
