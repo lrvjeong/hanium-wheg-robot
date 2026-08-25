@@ -17,7 +17,7 @@ class SensorFusionNode(Node):
         self.lidar_reliable_min = 0.30   # 30cm 이상에서만 라이다 신뢰
         self.lidar_height       = 0.05   # 라이다 장착 높이 (m)
         self.detect_range       = 0.35    # 전방 감지 거리 (m)
-        self.step_threshold     = 0.03   # 최소 단차 높이 (3cm)
+        self.step_threshold     = 0.005   # 최소 단차 높이 (3cm)
         self.side_limit         = 0.04    # 좌우 범위 (±4cm)
 
         # ToF 경계
@@ -115,14 +115,14 @@ class SensorFusionNode(Node):
                 step_z_sorted = sorted(step_z, reverse=True)
                 top_n = max(1, len(step_z_sorted) // 10)
                 step_height = sum(step_z_sorted[:top_n]) / top_n
-
+                step_height += 0.07
                 terrain.step_detected    = True
                 terrain.step_height      = float(step_height)
                 terrain.distance_to_step = float(self.latest_tof_dist)
                 terrain.slope_deg        = float(self.latest_pitch)
                 self.get_logger().info(
                     f'[병행 모드] 거리(ToF): {self.latest_tof_dist*100:.1f}cm | '
-                    f'높이(라이다): {step_height*100:.1f}cm'
+                    f'높이(라이다): {step_height*100 :.1f}cm'
                 )
             else:
                 terrain.step_detected = False
@@ -139,7 +139,7 @@ class SensorFusionNode(Node):
                 step_z_sorted = sorted(step_z, reverse=True)
                 top_n = max(1, len(step_z_sorted) // 10)
                 step_height = sum(step_z_sorted[:top_n]) / top_n
-
+                step_height += 0.07
                 terrain.step_detected    = True
                 terrain.step_height      = float(step_height)
                 terrain.distance_to_step = float(min_dist)
