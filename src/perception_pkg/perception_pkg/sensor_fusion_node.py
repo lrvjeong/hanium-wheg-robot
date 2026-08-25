@@ -15,10 +15,10 @@ class SensorFusionNode(Node):
         # 실험으로 찾은 CygLiDAR 신뢰 가능 경계
         # 이 값보다 가까우면 ToF로 전환
         self.lidar_reliable_min = 0.30   # 30cm 이상에서만 라이다 신뢰
-        self.lidar_height       = 0.15   # 라이다 장착 높이 (m)
-        self.detect_range       = 1.0    # 전방 감지 거리 (m)
+        self.lidar_height       = 0.05   # 라이다 장착 높이 (m)
+        self.detect_range       = 0.35    # 전방 감지 거리 (m)
         self.step_threshold     = 0.03   # 최소 단차 높이 (3cm)
-        self.side_limit         = 0.3    # 좌우 범위 (±30cm)
+        self.side_limit         = 0.04    # 좌우 범위 (±4cm)
 
         # ToF 경계
         self.tof_near_limit     = 0.10   # 10cm 이하는 ToF만 사용
@@ -71,9 +71,15 @@ class SensorFusionNode(Node):
         # 전방 범위 필터링
         front_points = [
             p for p in points
-            if 0.05 < p[0] < self.detect_range
+            if 0.15 < p[0] < self.detect_range
             and abs(p[1]) < self.side_limit
         ]
+        self.get_logger().info(
+            f'[DEBUG] front_points 개수: {len(front_points)}'
+            + (f', x범위: {min(p[0] for p in front_points):.2f}~{max(p[0] for p in front_points):.2f}, '
+               f'y범위: {min(p[1] for p in front_points):.2f}~{max(p[1] for p in front_points):.2f}'
+               if front_points else '')
+        )
 
         if not front_points:
             terrain.step_detected = False

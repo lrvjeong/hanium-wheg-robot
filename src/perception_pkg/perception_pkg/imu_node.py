@@ -4,7 +4,7 @@ import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import Imu
 
-SERIAL_PORT = '/dev/ttyUSB1'   # 실물 연결 후 ls /dev/ttyUSB* 로 확인해서 수정
+SERIAL_PORT = '/dev/imu_arduino'   # 실물 연결 후 ls /dev/ttyUSB* 로 확인해서 수정
 BAUDRATE = 9600                 # WT901 기본값 (모듈에 따라 115200일 수도 있음, 실물 보고 조정)
 
 FRAME_HEADER = 0x55

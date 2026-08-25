@@ -63,7 +63,7 @@ def generate_launch_description():
         executable = 'cyglidar_d2_publisher',
         output = 'screen',
         parameters=[
-           {"port_number": "/dev/ttyUSB0"},
+           {"port_number": "/dev/lidar"},
            {"baud_rate": LaunchConfiguration("baud_rate")},
            {"frame_id": "laser_frame"},
            {"fixed_frame": "/map"},

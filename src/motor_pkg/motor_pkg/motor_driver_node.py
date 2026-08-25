@@ -1,30 +1,22 @@
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Float32MultiArray
-
 from dynamixel_sdk import PortHandler, PacketHandler
-
 try:
     import pigpio
 except ImportError:
     pigpio = None
 
-
-DEVICENAME       = '/dev/ttyUSB0'
+DEVICENAME      = '/dev/dynamixel'
 BAUDRATE         = 57600
 PROTOCOL_VERSION = 2.0
-
 LEFT_MOTOR_ID  = 1
 RIGHT_MOTOR_ID = 2
-
 ADDR_OPERATING_MODE = 11
 ADDR_TORQUE_ENABLE  = 64
 ADDR_GOAL_VELOCITY  = 104
-
 OPERATING_MODE_VELOCITY = 1
-
 MAX_VELOCITY_UNIT = 200
-
 SERVO_GPIO_PINS = [5, 6, 13, 19]
 SERVO_MIN_PULSE = 500
 SERVO_MAX_PULSE = 2500
@@ -33,10 +25,10 @@ SERVO_MAX_PULSE = 2500
 class MotorDriverNode(Node):
     def __init__(self):
         super().__init__('motor_driver_node')
-
         self.port_handler = PortHandler(DEVICENAME)
         self.packet_handler = PacketHandler(PROTOCOL_VERSION)
         self.dxl_ready = False
+        self.ready_motors = set()  # 초기화 성공한 모터 ID만 여기 들어감
 
         try:
             port_opened = self.port_handler.openPort() and self.port_handler.setBaudRate(BAUDRATE)
@@ -49,6 +41,10 @@ class MotorDriverNode(Node):
             self.dxl_ready = True
             for motor_id in (LEFT_MOTOR_ID, RIGHT_MOTOR_ID):
                 self._setup_motor(motor_id)
+            if not self.ready_motors:
+                self.get_logger().error('초기화된 모터가 하나도 없음 — 구동 명령 무시됨')
+            else:
+                self.get_logger().info(f'사용 가능한 모터: {sorted(self.ready_motors)}')
         else:
             self.get_logger().warn('다이나믹셀 없이 서보/노드 기능만 테스트 모드로 진행')
 
@@ -71,29 +67,34 @@ class MotorDriverNode(Node):
         self.create_subscription(
             Float32MultiArray, '/motor/servo_cmd', self.servo_cmd_cb, 10
         )
-
         self.get_logger().info('모터 드라이버 노드 시작')
 
     def _setup_motor(self, motor_id: int):
-        self.packet_handler.write1ByteTxRx(
-            self.port_handler, motor_id, ADDR_TORQUE_ENABLE, 0
-        )
-        self.packet_handler.write1ByteTxRx(
-            self.port_handler, motor_id, ADDR_OPERATING_MODE, OPERATING_MODE_VELOCITY
-        )
-        dxl_comm_result, dxl_error = self.packet_handler.write1ByteTxRx(
-            self.port_handler, motor_id, ADDR_TORQUE_ENABLE, 1
-        )
+        try:
+            self.packet_handler.write1ByteTxRx(
+                self.port_handler, motor_id, ADDR_TORQUE_ENABLE, 0
+            )
+            self.packet_handler.write1ByteTxRx(
+                self.port_handler, motor_id, ADDR_OPERATING_MODE, OPERATING_MODE_VELOCITY
+            )
+            dxl_comm_result, dxl_error = self.packet_handler.write1ByteTxRx(
+                self.port_handler, motor_id, ADDR_TORQUE_ENABLE, 1
+            )
+        except Exception as e:
+            self.get_logger().error(f'모터 {motor_id} 초기화 중 예외 발생: {e}')
+            return
+
         if dxl_comm_result != 0:
             self.get_logger().error(
-                f'모터 {motor_id} 토크 켜기 실패: '
+                f'모터 {motor_id} 토크 켜기 실패 (연결 안 된 것으로 간주하고 건너뜀): '
                 f'{self.packet_handler.getTxRxResult(dxl_comm_result)}'
             )
         else:
+            self.ready_motors.add(motor_id)
             self.get_logger().info(f'모터 {motor_id} 초기화 완료 (속도 제어 모드)')
 
     def dc_cmd_cb(self, msg: Float32MultiArray):
-        if not self.dxl_ready:
+        if not self.dxl_ready or not self.ready_motors:
             return
         if len(msg.data) < 2:
             self.get_logger().warn('dc_cmd 데이터 부족 (좌/우 2개 필요)')
@@ -103,14 +104,19 @@ class MotorDriverNode(Node):
         left_vel = int(left_speed * MAX_VELOCITY_UNIT)
         right_vel = int(right_speed * MAX_VELOCITY_UNIT)
 
-        self.packet_handler.write4ByteTxRx(
-            self.port_handler, LEFT_MOTOR_ID, ADDR_GOAL_VELOCITY, self._to_uint32(left_vel)
-        )
-        self.packet_handler.write4ByteTxRx(
-            self.port_handler, RIGHT_MOTOR_ID, ADDR_GOAL_VELOCITY, self._to_uint32(right_vel)
-        )
+        sent = []
+        if LEFT_MOTOR_ID in self.ready_motors:
+            self.packet_handler.write4ByteTxRx(
+                self.port_handler, LEFT_MOTOR_ID, ADDR_GOAL_VELOCITY, self._to_uint32(left_vel)
+            )
+            sent.append(f'좌={left_vel}')
+        if RIGHT_MOTOR_ID in self.ready_motors:
+            self.packet_handler.write4ByteTxRx(
+                self.port_handler, RIGHT_MOTOR_ID, ADDR_GOAL_VELOCITY, self._to_uint32(right_vel)
+            )
+            sent.append(f'우={right_vel}')
 
-        self.get_logger().info(f'다이나믹셀 속도 설정: 좌={left_vel}, 우={right_vel}')
+        self.get_logger().info(f'다이나믹셀 속도 설정: {", ".join(sent)} (연결된 모터만 전송)')
 
     def servo_cmd_cb(self, msg: Float32MultiArray):
         if self.pi is None:
@@ -135,7 +141,7 @@ class MotorDriverNode(Node):
 
     def destroy_node(self):
         if self.dxl_ready:
-            for motor_id in (LEFT_MOTOR_ID, RIGHT_MOTOR_ID):
+            for motor_id in self.ready_motors:
                 self.packet_handler.write1ByteTxRx(
                     self.port_handler, motor_id, ADDR_TORQUE_ENABLE, 0
                 )
