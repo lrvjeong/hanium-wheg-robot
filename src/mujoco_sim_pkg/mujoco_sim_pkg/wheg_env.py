@@ -38,7 +38,7 @@ from climber_scene import (
     build_xml, DRIVE_MAX, DRIVE_MAX_BOOST, N_STEPS, STEP_H,
     STEP_D, STAIR_X0, LEG_MAX_ANGLE,
     LIDAR_ROWS, LIDAR_COLS, LIDAR_MIN_RANGE, LIDAR_MAX_RANGE,
-    LIDAR_FOV_V, LIDAR_MOUNT_TILT, START_Z,
+    LIDAR_FOV_H, LIDAR_FOV_V, LIDAR_MOUNT_TILT, START_Z,
 )
 
 # ===== 튜닝 상수 =====
@@ -147,56 +147,85 @@ def _lidar_scan(data):
     return out
 
 
-# ----- LiDAR 기반 장애물 감지 + 높이 추정 (삼각법, ground-truth 참조 없음) -----
-# 라이다 장착 높이(지면 기준): 차체 원점 높이(START_Z) 그대로 — 실제
-# climber_scene.py의 _lidar_sites()에서 라이다는 차체 로컬 z=0(상판-하판
-# 사이 중앙)에 장착돼있음. 예전엔 +0.03 오프셋이 있었는데, 그건 그 당시
-# 라이다 장착 위치가 지금과 달랐을 때 값이 남아있던 것 — 차체 구조가
-# 여러 번 바뀌면서 실제 장착 위치와 이 값이 어긋나 있었음. 이 미스매치
-# 때문에 평평한 바닥을 장애물로 잘못 감지해서, 다리가 계단 근처도 아닌데
-# 처음부터 펼쳐지는 버그가 있었음.
-_SENSOR_HEIGHT = START_Z
-_HEIGHT_MARGIN = 0.010  # 노이즈 대비 여유 [m] — 이 이상 짧게 찍혀야 "장애물"로 판정
-# 감지(wall_near) 판정에 걸리는 절대 최대 거리 [m] — 이게 없으면 수평에 가까운
-# 행은 '장애물 없을 때 예상거리' 자체가 워낙 커서(1m 이상), 계단과 무관한 먼
-# 지형에도 반응해 너무 일찍 멈춰서는 문제가 있었음. 실제로 계단 코앞까지
-# 왔을 때만 반응하도록 근거리로 제한.
-_MAX_DETECT_DIST = 0.18
+# ----- 실측 sensor_fusion_node.py와 동일한 지형 감지 파이프라인 -----
+# 시뮬레이션의 25개 rangefinder + ToF 1개를, 실제 로봇의 PointCloud2 + ToF
+# 처리 로직과 최대한 똑같이 재구성. 좌표계는 각 광선의 원점/방향이 이미
+# 차체(로봇 기준) 프레임으로 정의되어 있어서(climber_scene.py의 _lidar_sites),
+# 별도 좌표변환 없이 원점+거리*방향으로 바로 (x,y,z) 포인트를 얻을 수 있음.
+LIDAR_RELIABLE_MIN = 0.30   # 실측 sensor_fusion_node.py와 동일
+LIDAR_HEIGHT = 0.05          # 실측과 동일 (라이다 장착 높이)
+DETECT_RANGE = 0.35          # 전방 감지 거리
+STEP_THRESHOLD = 0.005       # 최소 단차 높이로 인정하는 하한
+SIDE_LIMIT = 0.04            # 좌우 범위
+TOF_NEAR_LIMIT = 0.10        # 이 이하는 ToF만 사용
+STEP_HEIGHT_OFFSET = 0.07    # 실측 코드의 경험적 보정값 그대로 반영
 
-# 각 행(row)의 하향각. climber_scene.py의 _lidar_sites와 동일한 공식
-# (pitch = LIDAR_MOUNT_TILT + v). 행마다 화각이 달라서, 로봇-계단 거리에 따라
-# 어느 행이 계단에 먼저 걸리는지가 달라짐 -> 모든 행을 스캔해야 함.
-# (라이다 장착 높이가 목표 단차보다 높아서, 수평에 가까운 행은 낮은 계단
-#  위로 그냥 지나가 버려 못 잡는다 -> 여러 행을 봐야 놓치지 않음)
-_ROW_TILTS = [
-    LIDAR_MOUNT_TILT + (-LIDAR_FOV_V / 2 + LIDAR_FOV_V * (r / max(LIDAR_ROWS - 1, 1)))
-    for r in range(LIDAR_ROWS)
-]
+# 각 라이다 광선의 (원점, 방향) — climber_scene.py의 _lidar_sites와 동일 공식
+_LIDAR_RAY_DIRS = []
+for _r in range(LIDAR_ROWS):
+    _v = -LIDAR_FOV_V / 2 + LIDAR_FOV_V * (_r / max(LIDAR_ROWS - 1, 1))
+    _pitch = LIDAR_MOUNT_TILT + _v
+    for _c in range(LIDAR_COLS):
+        _h = -LIDAR_FOV_H / 2 + LIDAR_FOV_H * (_c / max(LIDAR_COLS - 1, 1))
+        _zx = math.cos(_pitch) * math.cos(_h)
+        _zy = math.cos(_pitch) * math.sin(_h)
+        _zz = -math.sin(_pitch)
+        _LIDAR_RAY_DIRS.append((_zx, _zy, _zz))
 
 
-def _scan_obstruction(lidar_flat):
-    """중앙 열의 각 행을 스캔해서, 그 행 고유의 하향각 기준 '장애물 없을 때
-    예상 거리'보다 실제 거리가 짧게 찍힌 행이 있는지 확인하고, 있다면 그 중
-    최댓값으로 높이를 추정. wall_near 감지와 높이 추정을 하나로 통합 —
-    행 하나(예: 거의 수평인 행)만 보면 라이다 장착 높이보다 낮은 계단은
-    가까이 가도 위로 그냥 지나쳐서 놓칠 수 있기 때문."""
-    grid = lidar_flat.reshape(LIDAR_ROWS, LIDAR_COLS)
-    mid_col = LIDAR_COLS // 2
+def _lidar_to_points(lidar_flat):
+    """25개 raw 거리값 -> (x,y,z) 포인트 리스트. sensor_fusion_node.py가
+    받는 PointCloud2를 흉내냄 (원점은 라이다 장착 위치 기준 0,0,0으로 봄 —
+    실제 x범위 필터(0.15~0.35)도 이 기준이라 그대로 맞음)."""
+    points = []
+    for dist, (dx, dy, dz) in zip(lidar_flat, _LIDAR_RAY_DIRS):
+        if dist >= LIDAR_MAX_RANGE:  # cutoff에 걸려 무한대 취급된 광선은 제외
+            continue
+        points.append((dist * dx, dist * dy, dist * dz))
+    return points
 
-    detected = False
-    best_height = 0.0
-    for r in range(LIDAR_ROWS):
-        theta = _ROW_TILTS[r]
-        if theta <= 0:
-            continue  # 수평 이상은 지면 반사 기준 계산 불가 (스킵)
-        d = float(grid[r, mid_col])
-        expected_ground_dist = _SENSOR_HEIGHT / math.sin(theta)
-        if d < expected_ground_dist - _HEIGHT_MARGIN and d < _MAX_DETECT_DIST:
-            detected = True
-            height = _SENSOR_HEIGHT - d * math.sin(theta)
-            best_height = max(best_height, height)
 
-    return detected, max(0.0, best_height)
+def get_terrain_info(lidar_flat, tof_dist):
+    """sensor_fusion_node.py의 scan3d_cb()와 동일한 로직.
+    반환: dict(step_detected, step_height, distance_to_step, tof_active, tof_distance)
+    """
+    points = _lidar_to_points(lidar_flat)
+    front_points = [p for p in points if 0.15 < p[0] < DETECT_RANGE and abs(p[1]) < SIDE_LIMIT]
+
+    result = dict(step_detected=False, step_height=0.0, distance_to_step=0.0,
+                  tof_active=False, tof_distance=tof_dist)
+
+    if not front_points:
+        return result
+
+    min_dist = min(p[0] for p in front_points)
+
+    if tof_dist < TOF_NEAR_LIMIT:
+        result.update(tof_active=True, step_detected=True, step_height=0.0,
+                       distance_to_step=tof_dist)
+        return result
+
+    z_corrected = [p[2] + LIDAR_HEIGHT for p in front_points]
+    step_z = [z for z in z_corrected if z >= STEP_THRESHOLD]
+
+    if min_dist < LIDAR_RELIABLE_MIN:
+        result["tof_active"] = True
+        if step_z:
+            step_z_sorted = sorted(step_z, reverse=True)
+            top_n = max(1, len(step_z_sorted) // 10)
+            step_height = sum(step_z_sorted[:top_n]) / top_n + STEP_HEIGHT_OFFSET
+            result.update(step_detected=True, step_height=float(step_height),
+                           distance_to_step=float(tof_dist))
+        return result
+
+    # 30cm 이상: 라이다만 사용
+    if step_z:
+        step_z_sorted = sorted(step_z, reverse=True)
+        top_n = max(1, len(step_z_sorted) // 10)
+        step_height = sum(step_z_sorted[:top_n]) / top_n + STEP_HEIGHT_OFFSET
+        result.update(step_detected=True, step_height=float(step_height),
+                       distance_to_step=float(min_dist))
+    return result
 
 
 _STEP_CX = STAIR_X0 + 0.5 * STEP_D          # step0 x위치 (계단 높이와 무관, 고정)
@@ -263,14 +292,22 @@ class WhegEnv(gym.Env):
                                                                # (매 에피소드 이 값에서
                                                                # 다시 스케일링, 누적 곱셈 방지)
 
-        obs_low = np.concatenate([
-            np.full(N_LIDAR, LIDAR_MIN_RANGE, dtype=np.float32),
-            np.array([-math.pi, -50.0, -math.pi, -50.0, -math.pi, -50.0, 0.0], dtype=np.float32),
-        ])
-        obs_high = np.concatenate([
-            np.full(N_LIDAR, LIDAR_MAX_RANGE, dtype=np.float32),
-            np.array([math.pi, 50.0, math.pi, 50.0, math.pi, 50.0, LEG_MAX_ANGLE], dtype=np.float32),
-        ])
+        # 관측값 구조 (실측 sensor_fusion_node.py의 TerrainInfo 메시지와 동일하게
+        # 맞춤 — 기존엔 25개 raw 라이다값이었는데, 실제 로봇은 그 원시값을 안
+        # 주고 이미 요약된 지형정보(step_detected, step_height, distance_to_step,
+        # tof_active, tof_distance)만 주기 때문에 정책도 이 형태로 다시 학습함):
+        #   [step_detected, step_height, distance_to_step, tof_active, tof_distance,
+        #    pitch, pitch_rate, roll, roll_rate, yaw_rel, yaw_rate, deploy_angle]
+        obs_low = np.array(
+            [0.0, 0.0, 0.0, 0.0, 0.0,
+             -math.pi, -50.0, -math.pi, -50.0, -math.pi, -50.0, 0.0],
+            dtype=np.float32,
+        )
+        obs_high = np.array(
+            [1.0, 0.5, LIDAR_MAX_RANGE, 1.0, 0.5,
+             math.pi, 50.0, math.pi, 50.0, math.pi, 50.0, LEG_MAX_ANGLE],
+            dtype=np.float32,
+        )
         self.observation_space = spaces.Box(low=obs_low, high=obs_high, dtype=np.float32)
 
         self.action_space = spaces.Box(
@@ -290,6 +327,9 @@ class WhegEnv(gym.Env):
         self._start_z = 0.0
         self._measure_max_h = 0.0
         self._start_yaw = 0.0
+        self._last_terrain = dict(step_detected=False, step_height=0.0,
+                                    distance_to_step=0.0, tof_active=False,
+                                    tof_distance=0.15)
 
         # 상태기계: DRIVE -> MEASURE -> STOP -> DEPLOY -> CLIMB -> RETRACT -> DRIVE
         self._mode = "DRIVE"
@@ -301,6 +341,9 @@ class WhegEnv(gym.Env):
     # ------------------------------------------------------------
     def _get_obs(self):
         lidar = _lidar_scan(self.data)
+        tof_dist = float(self.data.sensor("tof_0").data[0])
+        if tof_dist < 0:
+            tof_dist = 0.15  # cutoff 밖(장애물 없음) -> ToF 최대치로 취급
         roll, pitch, yaw = _quat_to_euler(self.data.sensor("imu_quat").data)
         yaw_rel = yaw - self._start_yaw
         pitch_rate = float(self.data.sensor("imu_gyro").data[1])
@@ -311,31 +354,47 @@ class WhegEnv(gym.Env):
         if self.domain_randomize:
             lidar = lidar + self.np_random.normal(0, LIDAR_NOISE_STD, size=lidar.shape)
             lidar = np.clip(lidar, LIDAR_MIN_RANGE, LIDAR_MAX_RANGE)
+            tof_dist += self.np_random.normal(0, LIDAR_NOISE_STD)
             pitch += self.np_random.normal(0, IMU_ANGLE_NOISE_STD)
             roll += self.np_random.normal(0, IMU_ANGLE_NOISE_STD)
             pitch_rate += self.np_random.normal(0, IMU_RATE_NOISE_STD)
             roll_rate += self.np_random.normal(0, IMU_RATE_NOISE_STD)
             yaw_rate += self.np_random.normal(0, IMU_RATE_NOISE_STD)
 
-        return lidar, np.array(
+        # 실측 파이프라인과 동일한 지형정보 산출 (raw 라이다는 이 함수를
+        # 거쳐서만 정책에게 전달됨 — 25개 원시값 자체는 관측값에 안 들어감)
+        terrain = get_terrain_info(lidar, tof_dist)
+        terrain_obs = np.array([
+            1.0 if terrain["step_detected"] else 0.0,
+            terrain["step_height"],
+            terrain["distance_to_step"],
+            1.0 if terrain["tof_active"] else 0.0,
+            terrain["tof_distance"],
+        ], dtype=np.float32)
+
+        imu_obs = np.array(
             [pitch, pitch_rate, roll, roll_rate, yaw_rel, yaw_rate, deploy],
             dtype=np.float32,
         )
+        # 상태기계에서도 재사용할 수 있도록 저장
+        self._last_terrain = terrain
+        return terrain_obs, imu_obs
 
-    def _update_mode(self, lidar, pitch, pitch_rate):
+    def _update_mode(self, terrain_obs, pitch, pitch_rate):
         """DRIVE -> MEASURE -> (PUSH | STOP -> DEPLOY -> CLIMB -> RETRACT) -> DRIVE
         상태기계. (allow_drive, deploy_target, drive_max) 반환.
         allow_drive=False인 구간은 RL의 drive 명령을 강제로 0 처리.
 
-        wall_near/높이 추정 모두 _scan_obstruction()(라이다 다중 행 스캔)만
-        사용 — 시뮬레이션 내부 실제값을 몰래 참조하지 않음.
+        wall_near/높이 추정 모두 get_terrain_info()(실측 sensor_fusion_node.py와
+        동일한 포인트클라우드+ToF 융합 로직)만 사용.
         MEASURE에서 추정 높이 기준으로 분기:
           - LOW_STEP_THRESH(2cm) 이하로 추정: PUSH — 스포크 안 펴고
             고토크(DRIVE_MAX_BOOST)로 그냥 밀고 올라감 (무변형 등반)
           - 그보다 높게 추정: 기존 STOP->DEPLOY->CLIMB->RETRACT 시퀀스로 등반
         """
         self._t_in_mode += self._dt
-        wall_near, live_height = _scan_obstruction(lidar)
+        wall_near = self._last_terrain["step_detected"]
+        live_height = self._last_terrain["step_height"]
         opened = float(self.data.joint("leg_l1").qpos[0])  # 다리 각도 기준 (0=접힘, 양수=열림)
 
         if self._mode == "DRIVE":
@@ -405,9 +464,9 @@ class WhegEnv(gym.Env):
 
         return allow_drive, deploy_target, drive_max
 
-    def _apply_action(self, action, lidar, pitch, pitch_rate):
+    def _apply_action(self, action, terrain_obs, pitch, pitch_rate):
         action = np.clip(action, -1.0, 1.0)
-        allow_drive, deploy_target, drive_max = self._update_mode(lidar, pitch, pitch_rate)
+        allow_drive, deploy_target, drive_max = self._update_mode(terrain_obs, pitch, pitch_rate)
 
         if allow_drive:
             drive_l = float(action[0]) * drive_max
@@ -468,8 +527,8 @@ class WhegEnv(gym.Env):
         self._mode, self._t_in_mode, self._clear_t = "DRIVE", 0.0, 0.0
         self._measure_max_h = 0.0
 
-        lidar, rest = self._get_obs()
-        return np.concatenate([lidar, rest]), {
+        terrain_obs, imu_obs = self._get_obs()
+        return np.concatenate([terrain_obs, imu_obs]), {
             "mode": self._mode,
             "step_h_true": self._step_h,
             "step_h_estimated": self._last_estimated_h,
@@ -482,17 +541,17 @@ class WhegEnv(gym.Env):
         )
         self._prev_action = action.copy()
 
-        lidar, rest = self._get_obs()
-        pitch, pitch_rate = float(rest[0]), float(rest[1])
-        drive_l, drive_r, drive_max, allow_drive = self._apply_action(action, lidar, pitch, pitch_rate)
+        terrain_obs, imu_obs = self._get_obs()
+        pitch, pitch_rate = float(imu_obs[0]), float(imu_obs[1])
+        drive_l, drive_r, drive_max, allow_drive = self._apply_action(action, terrain_obs, pitch, pitch_rate)
 
         for _ in range(N_SUBSTEPS):
             mujoco.mj_step(self.model, self.data)
 
         self._step_count += 1
-        lidar, rest = self._get_obs()
-        obs = np.concatenate([lidar, rest])
-        pitch, roll, yaw_rel = float(rest[0]), float(rest[2]), float(rest[4])
+        terrain_obs, imu_obs = self._get_obs()
+        obs = np.concatenate([terrain_obs, imu_obs])
+        pitch, roll, yaw_rel = float(imu_obs[0]), float(imu_obs[2]), float(imu_obs[4])
 
         x, _, z = self.data.body("chassis").xpos
         x, z = float(x), float(z)

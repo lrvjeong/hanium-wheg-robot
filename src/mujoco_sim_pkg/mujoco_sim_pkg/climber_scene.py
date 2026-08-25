@@ -203,6 +203,12 @@ def _lidar_sites(front: float) -> str:
                 f'      <site name="{name}" pos="{_f(*base_pos)}" '
                 f'zaxis="{_f(zx, zy, zz)}" size="0.005" rgba="0 1 1 0.35"/>'
             )
+    # ToF(근접센서): 정면 정중앙, 라이다와 같은 자리에서 수평으로 짧은 거리만 측정
+    # (실측 sensor_fusion_node.py의 tof_near_limit=0.10m 근거리 폴백용)
+    lines.append(
+        f'      <site name="tof_0" pos="{_f(*base_pos)}" '
+        f'zaxis="1 0 0" size="0.005" rgba="1 1 0 0.35"/>'
+    )
     return "\n".join(lines)
 
 
@@ -214,6 +220,7 @@ def _lidar_sensors() -> str:
             lines.append(
                 f'    <rangefinder name="{name}" site="{name}" cutoff="{LIDAR_MAX_RANGE}"/>'
             )
+    lines.append(f'    <rangefinder name="tof_0" site="tof_0" cutoff="0.15"/>')
     return "\n".join(lines)
 
 
