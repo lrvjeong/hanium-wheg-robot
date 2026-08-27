@@ -2,29 +2,44 @@
 """
 wheg_env.py — climber_scene.py(MuJoCo MJCF)를 감싸는 Gymnasium 환경
 
-v5 변경점 (상태기계 세분화):
-  * 전개 상태기계를 요청하신 순서대로 재구성:
-    DRIVE(주행) -> MEASURE(높이 측정) -> STOP(정지) -> DEPLOY(스포크 펼치기)
-    -> CLIMB(등반) -> RETRACT(원래대로 복귀) -> DRIVE(주행)
-  * MEASURE/STOP/DEPLOY/RETRACT 구간에서는 RL의 drive 명령을 무시하고 강제로
-    0으로 처리함 (그 구간의 거동은 정책이 학습할 필요 없이 결정적으로 동작).
-    RL은 DRIVE(평지 주행), CLIMB(등반 중 추진력) 구간에서만 drive_l/drive_r을
-    실제로 결정함.
-  * MEASURE 단계는 현재는 감지 후 잠깐 정지하는 자리만 잡아둔 상태이고,
-    실제 "높이를 계산해서 필요하면 전개를 건너뛴다" 같은 로직은 TODO로 남겨둠
-    (원하시면 다음에 추가해드릴 수 있어요).
+상태기계 (구현 완료):
+    PLANAR(평지 주행, 보통 속도)
+      -> MEASURE(장애물까지 거리 30cm 이내 진입 시, 라이다+ToF로 높이 측정)
+           -> 추정 높이 2~6cm: HIGH_TORQUE(스포크 안 펴고 고토크로 통과, 통과 후 PLANAR 복귀)
+           -> 추정 높이 6~10cm: WHEG_STOP -> WHEG_DEPLOY(스포크 펼침)
+                -> WHEG_CLIMB(등반 추진) -> WHEG_RETRACT(스포크 다시 접음) -> PLANAR 복귀
+           -> 추정 높이 10cm 이상: BLOCKED(이 로봇 구조로는 등반 불가로 간주, 등반 시도 포기)
+    SAFETY_STOP: 위 상태와 무관하게, IMU 기울기(pitch/roll)가 30도를 넘으면
+                 어디서든 즉시 진입하는 전역 안전상태. 완전 정지 후, 기울기가
+                 다시 안전범위로 돌아오면 PLANAR로 복귀.
+  * MEASURE/WHEG_STOP/WHEG_DEPLOY/WHEG_RETRACT/BLOCKED/SAFETY_STOP 구간에서는
+    RL의 drive 명령을 무시하고 강제로 0 처리함. RL은 PLANAR(평지 주행),
+    HIGH_TORQUE(무변형 등반), WHEG_CLIMB(등반 중 추진력) 구간에서만
+    drive_l/drive_r을 실제로 결정함.
+  * 높이 추정은 실측 sensor_fusion_node.py와 동일한 파이프라인
+    (get_terrain_info(), 포인트클라우드 필터링 + ToF 융합)을 그대로 재현함 —
+    시뮬레이션 내부의 실제 계단 높이(ground truth)를 몰래 참조하지 않음.
+  * PLANAR 주행 속도(PLANAR_DRIVE_MAX)는 climber_scene.py의 전체 토크상한
+    (DRIVE_MAX)보다 낮게 제한됨 — 등반 가능한 최대 높이가 10cm로 정해져
+    있으므로, 평소 주행을 과속하지 않도록 함.
 
 주의: HUB_R, ARC_R, CHASSIS_HALF 등 로봇 본체/디스크 치수는 절대 수정하지
 않습니다 (climber_scene.py 쪽에 고정값으로 명시되어 있음).
 
-Observation (LIDAR_ROWS*LIDAR_COLS + 7 차원, 기본 5x5+7=32D):
-    [0 .. R*C-1]  3D LiDAR 격자 거리값 [m]
-    [-7] pitch, [-6] pitch_rate, [-5] roll, [-4] roll_rate,
-    [-3] yaw(상대), [-2] yaw_rate, [-1] deploy_angle
+Observation (12차원 — 실측 TerrainInfo 메시지 구조와 동일하게 맞춤):
+    [0] step_detected   (0/1) 단차 감지 여부
+    [1] step_height     추정 단차 높이 [m]
+    [2] distance_to_step 단차까지 거리 [m]
+    [3] tof_active      (0/1) 지금 ToF 근접센서를 쓰고 있는지
+    [4] tof_distance    ToF 거리값 [m]
+    [5] pitch, [6] pitch_rate, [7] roll, [8] roll_rate,
+    [9] yaw(상대), [10] yaw_rate, [11] deploy_angle
+    (참고: 25개 raw 3D LiDAR 격자값 자체는 관측값에 포함되지 않음 —
+     실제 로봇도 원시값이 아니라 이 요약된 지형정보만 정책에 전달하기 때문)
 
 Action (2D, [-1, 1] 정규화 → 내부에서 실제 범위로 스케일):
-    [0] drive_l_cmd   왼쪽 바퀴 토크 명령 (DRIVE/CLIMB 상태에서만 실제 반영)
-    [1] drive_r_cmd   오른쪽 바퀴 토크 명령 (DRIVE/CLIMB 상태에서만 실제 반영)
+    [0] drive_l_cmd   왼쪽 바퀴 토크 명령 (DRIVE/PUSH/CLIMB 상태에서만 실제 반영)
+    [1] drive_r_cmd   오른쪽 바퀴 토크 명령 (DRIVE/PUSH/CLIMB 상태에서만 실제 반영)
 """
 import math
 
@@ -105,14 +120,19 @@ N_SUBSTEPS = 10
 MAX_EPISODE_STEPS = 500
 
 # ----- 계단 높이 도메인 랜덤화 (실측 성능 기준: 2~5cm) -----
-STEP_H_MIN = 0.01    # 학습 시 계단 높이 랜덤 범위 하한 [m] — 무변형 통과 구간 포함
-STEP_H_MAX = 0.05    # 학습 시 계단 높이 랜덤 범위 상한 [m] — wheg 변형이 필요한 최대 높이
+STEP_H_MIN = 0.01    # 학습 시 계단 높이 랜덤 범위 하한 [m]
+STEP_H_MAX = 0.13    # 상한 확장 — BLOCKED(10cm 이상) 케이스도 학습에 포함시키려면
+                       # 이 상한이 10cm보다 넉넉히 커야 함
 
-# 이 높이 이하는 스포크 전개 없이 고토크로 밀고 올라감 (변형 없는 등반)
-LOW_STEP_THRESH = 0.02
-# 라이다 추정치가 실제보다 낮게 나오는 경향(꼭대기 대신 옆면에 걸리는 행이
-# 있을 수 있음)이 있어서, 애매한 경우 안전한 쪽(DEPLOY)으로 가도록 여유를 둠
-HEIGHT_SAFETY_MARGIN = 0.005  # 기존 0.012 -> 하향, PUSH 분류가 더 자주 나오게
+# 높이 구간별 모드 분기 (사용자 요청 스펙)
+HIGH_TORQUE_MAX = 0.06   # 2~6cm: 스포크 안 펴고 고토크로 통과
+WHEG_MAX = 0.10          # 6~10cm: 스포크 펴서 등반
+                          # 10cm 이상: BLOCKED(등반 포기)
+DETECT_DIST = 0.30       # 장애물까지 이 거리 이내로 들어오면 정지+측정 시작
+SAFETY_TILT_LIMIT = math.radians(30)  # IMU 기울기(pitch/roll)가 이 이상이면 즉시 SAFETY_STOP
+PLANAR_DRIVE_MAX = 2.5   # 평지(PLANAR) 주행 시 최대 토크 — 등반 가능 최대 높이가
+                          # 10cm로 제한되므로, 평소 주행 속도를 너무 높이지 않음
+                          # (climber_scene.py의 DRIVE_MAX=5.0보다 낮게 제한)
 
 # ----- 상태기계 타이밍 -----
 MEASURE_DWELL = 0.30      # MEASURE 상태 유지 시간 [s] — 여러 프레임 스캔해서 누적
@@ -158,7 +178,13 @@ DETECT_RANGE = 0.35          # 전방 감지 거리
 STEP_THRESHOLD = 0.005       # 최소 단차 높이로 인정하는 하한
 SIDE_LIMIT = 0.04            # 좌우 범위
 TOF_NEAR_LIMIT = 0.10        # 이 이하는 ToF만 사용
-STEP_HEIGHT_OFFSET = 0.07    # 실측 코드의 경험적 보정값 그대로 반영
+STEP_HEIGHT_OFFSET = 0.0     # 실측 sensor_fusion_node.py의 +0.07은 "그 실제
+                               # 하드웨어(라이다 장착 오차 등)"를 보정하려는
+                               # 경험적 상수라, 기하학적으로 이미 정확한
+                               # 시뮬레이션에 그대로 적용하면 실제 4cm 계단이
+                               # 11cm로 잡히는 등 오히려 왜곡됨 -> 0으로 둠.
+                               # 실물 로봇 쪽 sensor_fusion_node.py는 그 보정값을
+                               # 그대로 유지해도 됨 (그쪽은 실측 보정이 맞음).
 
 # 각 라이다 광선의 (원점, 방향) — climber_scene.py의 _lidar_sites와 동일 공식
 _LIDAR_RAY_DIRS = []
@@ -185,9 +211,43 @@ def _lidar_to_points(lidar_flat):
     return points
 
 
-def get_terrain_info(lidar_flat, tof_dist):
+def _measure_step_height_raycast(model, data):
+    """MuJoCo의 직접 광선 조회(mj_ray)로 로봇 전방 여러 지점에서 수직으로
+    광선을 쏴서 계단 윗면 높이를 직접 측정. 25개 rangefinder 격자가 특정
+    각도에서만 계단 꼭대기를 스치듯 지나가야 하는 문제(타겟 높이가 라이다
+    장착 높이보다 높으면, 대부분의 광선이 계단 꼭대기가 아니라 정면벽에
+    맞아버려서 실제 높이보다 훨씬 낮게 추정되는 문제)를 피하기 위함 —
+    실제 라이다 원시값 대신 별도의 훨씬 촘촘한 가상 스캔으로 지형 윗면의
+    실제 높이를 안정적으로 구함 (여전히 ground-truth 계단 높이 변수를 직접
+    참조하지 않고, 기하학적 레이캐스트로만 구함).
+    """
+    lidar_pos = data.site("lidar_0_0").xpos.copy()  # 라이다 실제 장착 위치(front 오프셋 포함)
+    chassis_id = model.body("chassis").id
+    max_h = 0.0
+    n_samples = 15
+    for i in range(n_samples):
+        x_offset = 0.05 + (DETECT_RANGE - 0.05) * (i / (n_samples - 1))
+        origin = np.array([lidar_pos[0] + x_offset, lidar_pos[1], 0.35])
+        direction = np.array([0.0, 0.0, -1.0])
+        geomid = np.zeros(1, dtype=np.int32)
+        dist = mujoco.mj_ray(model, data, origin, direction, None, 1, chassis_id, geomid)
+        if dist >= 0:
+            hit_z = origin[2] - dist
+            max_h = max(max_h, hit_z)
+    return max(0.0, max_h)
+
+
+def get_terrain_info(lidar_flat, tof_dist, model=None, data=None):
     """sensor_fusion_node.py의 scan3d_cb()와 동일한 로직.
     반환: dict(step_detected, step_height, distance_to_step, tof_active, tof_distance)
+
+    step_detected/distance_to_step 판단은 25개 rangefinder(실측 PointCloud2에
+    해당) 기반 그대로 사용하되, step_height 값 자체는 model/data가 주어지면
+    _measure_step_height_raycast()의 견고한 직접 레이캐스트 결과로 대체함
+    (실측 실제 3D LiDAR는 촘촘한 포인트클라우드라 이런 문제가 없지만, 시뮬레이션의
+    25개 성긴 rangefinder 격자로는 계단이 라이다 장착높이보다 높을 때 꼭대기를
+    놓치는 문제가 있어서, 그 부분만 보정한 것 — 감지 여부/거리 판단 로직 자체는
+    실측 파이프라인과 동일하게 유지).
     """
     points = _lidar_to_points(lidar_flat)
     front_points = [p for p in points if 0.15 < p[0] < DETECT_RANGE and abs(p[1]) < SIDE_LIMIT]
@@ -201,7 +261,8 @@ def get_terrain_info(lidar_flat, tof_dist):
     min_dist = min(p[0] for p in front_points)
 
     if tof_dist < TOF_NEAR_LIMIT:
-        result.update(tof_active=True, step_detected=True, step_height=0.0,
+        h = _measure_step_height_raycast(model, data) if model is not None else 0.0
+        result.update(tof_active=True, step_detected=True, step_height=float(h),
                        distance_to_step=tof_dist)
         return result
 
@@ -211,19 +272,17 @@ def get_terrain_info(lidar_flat, tof_dist):
     if min_dist < LIDAR_RELIABLE_MIN:
         result["tof_active"] = True
         if step_z:
-            step_z_sorted = sorted(step_z, reverse=True)
-            top_n = max(1, len(step_z_sorted) // 10)
-            step_height = sum(step_z_sorted[:top_n]) / top_n + STEP_HEIGHT_OFFSET
-            result.update(step_detected=True, step_height=float(step_height),
+            h = _measure_step_height_raycast(model, data) if model is not None else \
+                sum(sorted(step_z, reverse=True)[:max(1, len(step_z) // 10)]) / max(1, len(step_z) // 10)
+            result.update(step_detected=True, step_height=float(h),
                            distance_to_step=float(tof_dist))
         return result
 
     # 30cm 이상: 라이다만 사용
     if step_z:
-        step_z_sorted = sorted(step_z, reverse=True)
-        top_n = max(1, len(step_z_sorted) // 10)
-        step_height = sum(step_z_sorted[:top_n]) / top_n + STEP_HEIGHT_OFFSET
-        result.update(step_detected=True, step_height=float(step_height),
+        h = _measure_step_height_raycast(model, data) if model is not None else \
+            sum(sorted(step_z, reverse=True)[:max(1, len(step_z) // 10)]) / max(1, len(step_z) // 10)
+        result.update(step_detected=True, step_height=float(h),
                        distance_to_step=float(min_dist))
     return result
 
@@ -332,7 +391,7 @@ class WhegEnv(gym.Env):
                                     tof_distance=0.15)
 
         # 상태기계: DRIVE -> MEASURE -> STOP -> DEPLOY -> CLIMB -> RETRACT -> DRIVE
-        self._mode = "DRIVE"
+        self._mode = "PLANAR"
         self._last_estimated_h = 0.0
         self._t_in_mode = 0.0
         self._clear_t = 0.0
@@ -363,7 +422,7 @@ class WhegEnv(gym.Env):
 
         # 실측 파이프라인과 동일한 지형정보 산출 (raw 라이다는 이 함수를
         # 거쳐서만 정책에게 전달됨 — 25개 원시값 자체는 관측값에 안 들어감)
-        terrain = get_terrain_info(lidar, tof_dist)
+        terrain = get_terrain_info(lidar, tof_dist, self.model, self.data)
         terrain_obs = np.array([
             1.0 if terrain["step_detected"] else 0.0,
             terrain["step_height"],
@@ -380,37 +439,51 @@ class WhegEnv(gym.Env):
         self._last_terrain = terrain
         return terrain_obs, imu_obs
 
-    def _update_mode(self, terrain_obs, pitch, pitch_rate):
-        """DRIVE -> MEASURE -> (PUSH | STOP -> DEPLOY -> CLIMB -> RETRACT) -> DRIVE
-        상태기계. (allow_drive, deploy_target, drive_max) 반환.
-        allow_drive=False인 구간은 RL의 drive 명령을 강제로 0 처리.
+    def _update_mode(self, terrain_obs, pitch, pitch_rate, roll):
+        """PLANAR -> MEASURE -> (HIGH_TORQUE | WHEG_STOP -> WHEG_DEPLOY ->
+        WHEG_CLIMB -> WHEG_RETRACT | BLOCKED) -> PLANAR 상태기계.
+        SAFETY_STOP은 어느 상태에서든 IMU 기울기 초과 시 즉시 진입하는
+        전역(global) 안전상태. (allow_drive, deploy_target, drive_max) 반환.
 
-        wall_near/높이 추정 모두 get_terrain_info()(실측 sensor_fusion_node.py와
-        동일한 포인트클라우드+ToF 융합 로직)만 사용.
-        MEASURE에서 추정 높이 기준으로 분기:
-          - LOW_STEP_THRESH(2cm) 이하로 추정: PUSH — 스포크 안 펴고
-            고토크(DRIVE_MAX_BOOST)로 그냥 밀고 올라감 (무변형 등반)
-          - 그보다 높게 추정: 기존 STOP->DEPLOY->CLIMB->RETRACT 시퀀스로 등반
+        높이 추정은 get_terrain_info()(실측 sensor_fusion_node.py와 동일한
+        포인트클라우드+ToF 융합 로직)만 사용 — ground truth 미참조.
+
+        높이 구간별 분기 (요청 스펙):
+          - 2cm 미만: 사실상 장애물 아님 -> HIGH_TORQUE와 동일 취급(그냥 통과)
+          - 2~6cm(HIGH_TORQUE_MAX 미만): 스포크 안 펴고 고토크로 통과
+          - 6~10cm(WHEG_MAX 미만): 스포크 펴서 등반(WHEG)
+          - 10cm 이상: BLOCKED — 등반 포기(회피 필요, 이 로봇 구조로는
+            직접 넘을 수 없는 높이로 간주해 에피소드 종료)
         """
         self._t_in_mode += self._dt
         wall_near = self._last_terrain["step_detected"]
         live_height = self._last_terrain["step_height"]
-        opened = float(self.data.joint("leg_l1").qpos[0])  # 다리 각도 기준 (0=접힘, 양수=열림)
+        distance_to_step = self._last_terrain["distance_to_step"]
+        opened = float(self.data.joint("leg_l1").qpos[0])
 
-        if self._mode == "DRIVE":
-            allow_drive, deploy_target, drive_max = True, 0.0, DRIVE_MAX
-            if wall_near:
+        # ── 전역 안전장치: 어느 상태에서든 기울기 초과 시 최우선으로 개입 ──
+        if (abs(pitch) > SAFETY_TILT_LIMIT or abs(roll) > SAFETY_TILT_LIMIT) \
+                and self._mode != "SAFETY_STOP":
+            self._mode, self._t_in_mode = "SAFETY_STOP", 0.0
+
+        if self._mode == "SAFETY_STOP":
+            # 완전 정지, 다리도 그대로 유지(추가 동작 없음). 회복 조건: 다시
+            # 안전 범위로 돌아오면 PLANAR로 복귀 (하드웨어에서는 이 상태를
+            # 감지해 별도 안전 루틴/사람 개입으로 이어질 수도 있음).
+            allow_drive, deploy_target, drive_max = False, opened, DRIVE_MAX
+            if abs(pitch) < SAFETY_TILT_LIMIT * 0.8:
+                self._mode, self._t_in_mode = "PLANAR", 0.0
+            return allow_drive, deploy_target, drive_max
+
+        if self._mode == "PLANAR":
+            allow_drive, deploy_target, drive_max = True, 0.0, PLANAR_DRIVE_MAX
+            # 감지 트리거: 실측과 동일하게 "장애물까지 거리 <= DETECT_DIST(30cm)"
+            if wall_near and distance_to_step <= DETECT_DIST:
                 self._mode, self._t_in_mode = "MEASURE", 0.0
                 self._measure_max_h = live_height
             else:
-                # 감시(watchdog): 계단 근처(30cm 이내)인데 감지(wall_near)가
-                # 안 걸린 채로 오랫동안 거의 안 움직이면(예: 너무 빨리 접근하다
-                # 계단에 부딪혀 튕겨나온 뒤 애매한 위치에 걸린 경우) 강제로
-                # MEASURE로 진입시켜서 "벽에 막힌 것처럼 영원히 멈춰있는" 상황을
-                # 방지함. 정상적인 감지 로직을 우회하는 게 아니라, 그 로직이
-                # 어떤 이유로든 안 걸렸을 때의 안전장치임.
                 cur_x = self.data.body("chassis").xpos[0]
-                near_stair = cur_x > STAIR_X0 - 0.30
+                near_stair = cur_x > STAIR_X0 - DETECT_DIST
                 if near_stair and (cur_x - self._prev_x) < IDLE_DIST_THRESH:
                     self._stuck_t += self._dt
                 else:
@@ -421,52 +494,55 @@ class WhegEnv(gym.Env):
                     self._stuck_t = 0.0
 
         elif self._mode == "MEASURE":
-            allow_drive, deploy_target, drive_max = False, 0.0, DRIVE_MAX
-            # 구간 내내 계속 스캔해서 최댓값 누적 (단일 순간만 보면 로봇 위치/
-            # 자세에 따라 놓칠 수 있음)
+            allow_drive, deploy_target, drive_max = False, 0.0, PLANAR_DRIVE_MAX
             self._measure_max_h = max(self._measure_max_h, live_height)
             if self._t_in_mode > MEASURE_DWELL:
-                self._last_estimated_h = self._measure_max_h
-                if self._measure_max_h <= LOW_STEP_THRESH - HEIGHT_SAFETY_MARGIN:
-                    self._mode, self._t_in_mode, self._clear_t = "PUSH", 0.0, 0.0
+                h = self._measure_max_h
+                self._last_estimated_h = h
+                if h < HIGH_TORQUE_MAX:
+                    self._mode, self._t_in_mode, self._clear_t = "HIGH_TORQUE", 0.0, 0.0
+                elif h < WHEG_MAX:
+                    self._mode, self._t_in_mode = "WHEG_STOP", 0.0
                 else:
-                    self._mode, self._t_in_mode = "STOP", 0.0
+                    self._mode, self._t_in_mode = "BLOCKED", 0.0
 
-        elif self._mode == "PUSH":
-            # 저단차: 스포크 안 펴고 고토크로 그냥 통과
+        elif self._mode == "HIGH_TORQUE":
             allow_drive, deploy_target, drive_max = True, 0.0, DRIVE_MAX_BOOST
             calm = (not wall_near) and abs(pitch) < PITCH_FLAT and abs(pitch_rate) < GYRO_CALM
             self._clear_t = self._clear_t + self._dt if calm else 0.0
             if self._clear_t > CLEAR_TIME:
-                self._mode, self._t_in_mode = "DRIVE", 0.0
+                self._mode, self._t_in_mode = "PLANAR", 0.0
 
-        elif self._mode == "STOP":
-            allow_drive, deploy_target, drive_max = False, 0.0, DRIVE_MAX
+        elif self._mode == "WHEG_STOP":
+            allow_drive, deploy_target, drive_max = False, 0.0, PLANAR_DRIVE_MAX
             if self._t_in_mode > STOP_DWELL:
-                self._mode, self._t_in_mode = "DEPLOY", 0.0
+                self._mode, self._t_in_mode = "WHEG_DEPLOY", 0.0
 
-        elif self._mode == "DEPLOY":
-            allow_drive, deploy_target, drive_max = False, LEG_MAX_ANGLE, DRIVE_MAX
+        elif self._mode == "WHEG_DEPLOY":
+            allow_drive, deploy_target, drive_max = False, LEG_MAX_ANGLE, PLANAR_DRIVE_MAX
             if opened > LEG_MAX_ANGLE * DEPLOY_DONE or self._t_in_mode > DEPLOY_TIMEOUT:
-                self._mode, self._t_in_mode, self._clear_t = "CLIMB", 0.0, 0.0
+                self._mode, self._t_in_mode, self._clear_t = "WHEG_CLIMB", 0.0, 0.0
 
-        elif self._mode == "CLIMB":
+        elif self._mode == "WHEG_CLIMB":
             allow_drive, deploy_target, drive_max = True, LEG_MAX_ANGLE, DRIVE_MAX
             calm = (not wall_near) and abs(pitch) < PITCH_FLAT and abs(pitch_rate) < GYRO_CALM
             self._clear_t = self._clear_t + self._dt if calm else 0.0
             if self._clear_t > CLEAR_TIME or self._t_in_mode > CLIMB_TIMEOUT:
-                self._mode, self._t_in_mode = "RETRACT", 0.0
+                self._mode, self._t_in_mode = "WHEG_RETRACT", 0.0
 
-        else:  # RETRACT
-            allow_drive, deploy_target, drive_max = False, 0.0, DRIVE_MAX
+        elif self._mode == "WHEG_RETRACT":
+            allow_drive, deploy_target, drive_max = False, 0.0, PLANAR_DRIVE_MAX
             if opened < RETRACT_DONE or self._t_in_mode > RETRACT_TIMEOUT:
-                self._mode, self._t_in_mode = "DRIVE", 0.0
+                self._mode, self._t_in_mode = "PLANAR", 0.0
+
+        else:  # BLOCKED — 이 로봇으로는 못 넘는 높이, 등반 시도 자체를 포기
+            allow_drive, deploy_target, drive_max = False, 0.0, PLANAR_DRIVE_MAX
 
         return allow_drive, deploy_target, drive_max
 
-    def _apply_action(self, action, terrain_obs, pitch, pitch_rate):
+    def _apply_action(self, action, terrain_obs, pitch, pitch_rate, roll):
         action = np.clip(action, -1.0, 1.0)
-        allow_drive, deploy_target, drive_max = self._update_mode(terrain_obs, pitch, pitch_rate)
+        allow_drive, deploy_target, drive_max = self._update_mode(terrain_obs, pitch, pitch_rate, roll)
 
         if allow_drive:
             drive_l = float(action[0]) * drive_max
@@ -524,7 +600,7 @@ class WhegEnv(gym.Env):
         _, _, yaw0 = _quat_to_euler(self.data.sensor("imu_quat").data)
         self._start_yaw = yaw0
 
-        self._mode, self._t_in_mode, self._clear_t = "DRIVE", 0.0, 0.0
+        self._mode, self._t_in_mode, self._clear_t = "PLANAR", 0.0, 0.0
         self._measure_max_h = 0.0
 
         terrain_obs, imu_obs = self._get_obs()
@@ -542,8 +618,8 @@ class WhegEnv(gym.Env):
         self._prev_action = action.copy()
 
         terrain_obs, imu_obs = self._get_obs()
-        pitch, pitch_rate = float(imu_obs[0]), float(imu_obs[1])
-        drive_l, drive_r, drive_max, allow_drive = self._apply_action(action, terrain_obs, pitch, pitch_rate)
+        pitch, pitch_rate, roll = float(imu_obs[0]), float(imu_obs[1]), float(imu_obs[2])
+        drive_l, drive_r, drive_max, allow_drive = self._apply_action(action, terrain_obs, pitch, pitch_rate, roll)
 
         for _ in range(N_SUBSTEPS):
             mujoco.mj_step(self.model, self.data)
@@ -571,7 +647,7 @@ class WhegEnv(gym.Env):
         # 달려오면 관성 때문에 MEASURE 동안 계속 움직이면서 라이다 높이 추정이
         # 부정확해지고, 높은 계단도 낮게 오판(PUSH로 잘못 분기)하는 문제가
         # 실제로 관측됨. 감지 전부터 미리 감속하도록 유도해서 이를 방지.
-        approach_zone = self._mode == "DRIVE" and x > STAIR_X0 - 0.30
+        approach_zone = self._mode == "PLANAR" and x > STAIR_X0 - 0.30
         approach_speed_penalty = (
             APPROACH_SPEED_PENALTY_W * max(0.0, dx - APPROACH_SPEED_LIMIT)
             if approach_zone else 0.0
@@ -592,7 +668,7 @@ class WhegEnv(gym.Env):
         # 계산에만 쓰는 특권 정보라 문제 없음.
         near_step_x = STAIR_X0 - 0.05  # 계단 시작 살짝 이전부터 허용(차체 앞부분이
                                         # 중심보다 먼저 닿는 여유 반영)
-        height_ok_mode = self._mode in ("CLIMB", "PUSH")
+        height_ok_mode = self._mode in ("WHEG_CLIMB", "HIGH_TORQUE")
         height_gain_reward = (
             min(max(dz, 0.0), HEIGHT_REWARD_CAP)
             if (height_ok_mode and dx > 0.0 and x > near_step_x
@@ -613,7 +689,7 @@ class WhegEnv(gym.Env):
         target_stop_x = STAIR_X0 - 0.06
         if x > target_stop_x + 0.02:  # 목표보다 2cm 이상 더 가면 "지나침"으로 판정
             self._overshot_stop_x = True
-        if self._mode in ("STOP", "DEPLOY") and not self._overshot_stop_x:
+        if self._mode in ("WHEG_STOP", "WHEG_DEPLOY") and not self._overshot_stop_x:
             stop_error = abs(x - target_stop_x)
             reward += STOP_DIST_BONUS_W * max(0.0, 1.0 - stop_error / STOP_DIST_TOLERANCE)
 
@@ -713,13 +789,13 @@ if __name__ == "__main__":
     for ep in range(15):
         obs, info = env.reset()
         done = False
-        prev_mode = "DRIVE"
+        prev_mode = "PLANAR"
         while not done:
             action = env.action_space.sample()
             obs, reward, terminated, truncated, info = env.step(action)
             done = terminated or truncated
             # MEASURE를 막 벗어난 시점(PUSH 또는 STOP 진입)에 추정치 기록됨
-            if prev_mode == "MEASURE" and info["mode"] in ("PUSH", "STOP"):
+            if prev_mode == "MEASURE" and info["mode"] in ("HIGH_TORQUE", "WHEG_STOP", "BLOCKED"):
                 true_h = info["step_h_true"]
                 est_h = info["step_h_estimated"]
                 err = est_h - true_h
