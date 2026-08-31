@@ -58,11 +58,11 @@ def generate_launch_description():
         output='screen'
     )
 
-    # 모터 드라이버 노드 (실제 하드웨어 제어)
-    motor_driver_node = Node(
+    # 모터/안전 통합 노드 (다이나믹셀 + 아두이노 서보/IMU 전담, 실제 하드웨어 제어)
+    safety_stop_node = Node(
         package='motor_pkg',
-        executable='motor_driver_node',
-        name='motor_driver_node',
+        executable='safety_stop_node',
+        name='safety_stop_node',
         output='screen'
     )
 
