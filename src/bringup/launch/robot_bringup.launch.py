@@ -73,5 +73,5 @@ def generate_launch_description():
         imu_node,
         mode_fsm_node,
         motor_interface_node,
-        motor_driver_node,
+        safety_stop_node,        # 수정
     ])
