@@ -34,14 +34,6 @@ def generate_launch_description():
         output='screen'
     )
 
-    # IMU 노드
-    imu_node = Node(
-        package='perception_pkg',
-        executable='imu_node',
-        name='imu_node',
-        output='screen'
-    )
-
     # FSM 노드
     mode_fsm_node = Node(
         package='control_pkg',
@@ -70,7 +62,6 @@ def generate_launch_description():
         cyglidar_launch,
         sensor_fusion_node,
         tof_node,
-        imu_node,
         mode_fsm_node,
         motor_interface_node,
         safety_stop_node,        # 수정
