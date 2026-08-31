@@ -19,7 +19,7 @@ from dynamixel_sdk import (
 )
 
 # ------------------- 사용자 설정 -------------------
-DEVICENAME = "/dev/ttyUSB2"
+DEVICENAME = "/dev/ttyUSB1"
 BAUDRATE = 57600
 PROTOCOL_VERSION = 2.0
 

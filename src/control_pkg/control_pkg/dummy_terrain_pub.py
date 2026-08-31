@@ -20,6 +20,9 @@ class DummyTerrainPub(Node):
             (False, 0.00, 1.00, '단차 통과 → PLANAR'),
             (True,  0.15, 0.08, '15cm 단차, 8cm 거리 → BLOCKED'),
             (False, 0.00, 1.00, '단차 회피 → PLANAR'),
+            (False, 0.00, 1.00, '평지 주행 중'),
+            (True,  0.08, 0.28, '8cm 단차, 28cm 거리 → STEP_STOP'),   # 새로 추가
+            (False, 0.00, 1.00, '단차 사라짐 → PLANAR'),
         ]
         s = scenarios[self.step % len(scenarios)]
         msg.step_detected    = s[0]

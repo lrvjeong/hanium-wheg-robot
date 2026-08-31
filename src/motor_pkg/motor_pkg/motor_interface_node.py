@@ -43,6 +43,7 @@ class MotorInterfaceNode(Node):
             2: 'WHEG',
             3: 'BLOCKED',
             4: 'SAFETY_STOP'
+            5: 'STEP_STOP'
         }
         self.get_logger().info(
             f'모드 수신: {labels.get(msg.state, "UNKNOWN")}'
@@ -75,6 +76,10 @@ class MotorInterfaceNode(Node):
             self.set_dc(self.STOP_SPEED)
             self.set_servo(self.WHEEL_MODE_ANGLE)
             self.get_logger().error('전복 위험 — 긴급 정지!')
+        elif msg.state == RobotMode.STEP_STOP:
+            self.set_dc(self.STOP_SPEED)
+            self.set_servo(self.WHEEL_MODE_ANGLE)
+            self.get_logger().info('30cm 단차 인식 — 정지')
 
     def set_dc(self, speed: float):
         """DC 모터 좌/우 속도 설정 (0.0~1.0)"""

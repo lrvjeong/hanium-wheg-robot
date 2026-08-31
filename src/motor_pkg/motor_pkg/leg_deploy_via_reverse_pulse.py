@@ -20,7 +20,7 @@ from dynamixel_sdk import (
 )
 
 # ------------------- 사용자 설정 -------------------
-DEVICENAME = "/dev/ttyUSB0"
+DEVICENAME = "/dev/ttyUSB1"
 BAUDRATE = 57600
 PROTOCOL_VERSION = 2.0
 
@@ -141,7 +141,7 @@ if __name__ == "__main__":
     try:
         print("평소 주행 시작 (Ctrl+C 전까지 계속 전진)")
         drive_forward(port_handler, packet_handler)
-        time.sleep(1)  # 평지 주행 예시 - 실제로는 LiDAR가 계단 감지했을 때 아래 함수 호출
+        time.sleep(3)  # 평지 주행 예시 - 실제로는 LiDAR가 계단 감지했을 때 아래 함수 호출
 
         deploy_legs(port_handler, packet_handler)
 

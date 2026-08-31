@@ -24,8 +24,9 @@ setup(
         'console_scripts': [
             'motor_interface_node = motor_pkg.motor_interface_node:main',
             'motor_driver_node = motor_pkg.motor_driver_node:main',
-            'leg_control_node = motor_pkg.leg_control_node:main'
-
+            'leg_control_node = motor_pkg.leg_control_node:main',
+            'drive_until_step_node = motor_pkg.drive_until_step_node:main',
+            'safety_stop_node = motor_pkg.safety_stop_node:main'
         ],
     },
 )

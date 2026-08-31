@@ -6,7 +6,7 @@ ID가 1개만 나오면 -> 두 모터가 같은 ID를 쓰고 있다는 뜻입니
 
 from dynamixel_sdk import PortHandler, PacketHandler
 
-DEVICENAME = "/dev/ttyUSB2"
+DEVICENAME = "/dev/ttyUSB1"
 BAUDRATE = 57600
 PROTOCOL_VERSION = 2.0
 

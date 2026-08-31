@@ -4,16 +4,21 @@ from rclpy.node import Node
 from robot_msgs.msg import TerrainInfo, RobotMode
 from sensor_msgs.msg import Imu
 
+
 class ModeFsmNode(Node):
     def __init__(self):
         super().__init__('mode_fsm_node')
         self.state = RobotMode.PLANAR
 
         # 단차 판별 기준
-        self.approach_dist  = 0.10  # 단차 10cm 이내 접근 시 모드 전환
-        self.high_torque_h  = 0.03  # 3cm 이하 → 고토크
-        self.wheg_h         = 0.10  # 3~10cm → 휠레그
-                                    # 10cm 초과 → 못 넘음
+        self.stop_dist      = 0.30   # 30cm 이내 단차 인식 → 무조건 정지
+        self.stop_hold_sec  = 1.5    # 정지 유지 시간(초) - 이 시간 지난 뒤에 높이 판별
+
+        self.high_torque_h  = 0.03   # 3cm 미만 → 고토크
+        self.wheg_h          = 0.10   # 3~10cm → 휘그
+                                       # 10cm 이상 → 블락
+
+        self.stop_entered_time = None
 
         self.create_subscription(TerrainInfo, '/terrain/info', self.terrain_cb, 10)
         self.create_subscription(Imu, '/imu/data', self.imu_cb, 10)
@@ -25,17 +30,28 @@ class ModeFsmNode(Node):
         prev = self.state
 
         if self.state == RobotMode.PLANAR:
-            # 단차 감지 + 10cm 이내 접근했을 때만 모드 전환
-            if msg.step_detected and msg.distance_to_step <= self.approach_dist:
-                if msg.step_height < self.high_torque_h:
-                    # 3cm 미만 → 고토크로 그냥 넘기
-                    self.state = RobotMode.HIGH_TORQUE
-                elif msg.step_height < self.wheg_h:
-                    # 3cm 이상 10cm 미만 → 휠레그 전개
-                    self.state = RobotMode.WHEG
-                else:
-                    # 10cm 이상 → 못 넘음
-                    self.state = RobotMode.BLOCKED
+            # 30cm 이내로 단차 인식되면 무조건 정지
+            if msg.step_detected and msg.distance_to_step <= self.stop_dist:
+                self.state = RobotMode.STEP_STOP
+                self.stop_entered_time = self.get_clock().now()
+                self.get_logger().info(
+                    f'단차 인식 (거리 {msg.distance_to_step*100:.1f}cm) → 정지, 높이 판별 대기'
+                )
+
+        elif self.state == RobotMode.STEP_STOP:
+            # 정지 도중 단차가 사라지면(오탐/지나감) 평지로 복귀
+            if not msg.step_detected:
+                self.state = RobotMode.PLANAR
+            else:
+                elapsed = (self.get_clock().now() - self.stop_entered_time).nanoseconds / 1e9
+                if elapsed >= self.stop_hold_sec:
+                    # 정지 유지 끝났으면 높이 보고 모드 결정
+                    if msg.step_height < self.high_torque_h:
+                        self.state = RobotMode.HIGH_TORQUE
+                    elif msg.step_height < self.wheg_h:
+                        self.state = RobotMode.WHEG
+                    else:
+                        self.state = RobotMode.BLOCKED
 
         elif self.state in (
             RobotMode.HIGH_TORQUE,
@@ -53,7 +69,8 @@ class ModeFsmNode(Node):
                 1: 'HIGH_TORQUE',
                 2: 'WHEG',
                 3: 'BLOCKED',
-                4: 'SAFETY_STOP'
+                4: 'SAFETY_STOP',
+                5: 'STEP_STOP'
             }
             self.get_logger().info(
                 f'상태 전환: {labels[prev]} → {labels[self.state]}'
@@ -81,6 +98,7 @@ class ModeFsmNode(Node):
         msg.state = self.state
         self.mode_pub.publish(msg)
 
+
 def main():
     rclpy.init()
     node = ModeFsmNode()
@@ -88,6 +106,6 @@ def main():
     node.destroy_node()
     rclpy.shutdown()
 
+
 if __name__ == '__main__':
     main()
-
