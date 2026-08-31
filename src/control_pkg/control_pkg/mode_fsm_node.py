@@ -10,13 +10,14 @@ class ModeFsmNode(Node):
         super().__init__('mode_fsm_node')
         self.state = RobotMode.PLANAR
 
-        # 단차 판별 기준
         self.stop_dist      = 0.30   # 30cm 이내 단차 인식 → 무조건 정지
-        self.stop_hold_sec  = 1.5    # 정지 유지 시간(초) - 이 시간 지난 뒤에 높이 판별
+        self.stop_hold_sec  = 1.5    # 정지 유지 시간(초)
 
-        self.high_torque_h  = 0.03   # 3cm 미만 → 고토크
-        self.wheg_h          = 0.10   # 3~10cm → 휘그
-                                       # 10cm 이상 → 블락
+        # 단차 판별 기준
+        self.no_step_h      = 0.01   # 1cm 미만 → 단차로 안 침 (바닥 인식 오차)
+        self.high_torque_h  = 0.03   # 1~3cm → 고토크
+        self.wheg_h          = 0.06   # 3~6cm → 휘그
+                                       # 6cm 이상 → 블락
 
         self.stop_entered_time = None
 
@@ -30,7 +31,6 @@ class ModeFsmNode(Node):
         prev = self.state
 
         if self.state == RobotMode.PLANAR:
-            # 30cm 이내로 단차 인식되면 무조건 정지
             if msg.step_detected and msg.distance_to_step <= self.stop_dist:
                 self.state = RobotMode.STEP_STOP
                 self.stop_entered_time = self.get_clock().now()
@@ -39,14 +39,15 @@ class ModeFsmNode(Node):
                 )
 
         elif self.state == RobotMode.STEP_STOP:
-            # 정지 도중 단차가 사라지면(오탐/지나감) 평지로 복귀
             if not msg.step_detected:
                 self.state = RobotMode.PLANAR
             else:
                 elapsed = (self.get_clock().now() - self.stop_entered_time).nanoseconds / 1e9
                 if elapsed >= self.stop_hold_sec:
-                    # 정지 유지 끝났으면 높이 보고 모드 결정
-                    if msg.step_height < self.high_torque_h:
+                    if msg.step_height < self.no_step_h:
+                        # 1cm 미만 → 단차 아님, 그냥 평지로 취급
+                        self.state = RobotMode.PLANAR
+                    elif msg.step_height < self.high_torque_h:
                         self.state = RobotMode.HIGH_TORQUE
                     elif msg.step_height < self.wheg_h:
                         self.state = RobotMode.WHEG
@@ -58,19 +59,13 @@ class ModeFsmNode(Node):
             RobotMode.WHEG,
             RobotMode.BLOCKED
         ):
-            # 단차 없어지면 평지로 복귀
             if not msg.step_detected:
                 self.state = RobotMode.PLANAR
 
-        # 상태 바뀌었을 때만 로그 출력
         if prev != self.state:
             labels = {
-                0: 'PLANAR',
-                1: 'HIGH_TORQUE',
-                2: 'WHEG',
-                3: 'BLOCKED',
-                4: 'SAFETY_STOP',
-                5: 'STEP_STOP'
+                0: 'PLANAR', 1: 'HIGH_TORQUE', 2: 'WHEG',
+                3: 'BLOCKED', 4: 'SAFETY_STOP', 5: 'STEP_STOP'
             }
             self.get_logger().info(
                 f'상태 전환: {labels[prev]} → {labels[self.state]}'
