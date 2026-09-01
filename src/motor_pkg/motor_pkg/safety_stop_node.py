@@ -22,7 +22,7 @@ from std_msgs.msg import Float32MultiArray
 
 from dynamixel_sdk import PortHandler, PacketHandler, GroupSyncWrite, COMM_SUCCESS
 
-DXL_DEVICENAME = "/dev/ttyUSB1"
+DXL_DEVICENAME = "/dev/ttyUSB0"
 DXL_BAUDRATE = 57600
 PROTOCOL_VERSION = 2.0
 
@@ -40,7 +40,7 @@ OPERATING_MODE_VELOCITY = 1
 MAX_VELOCITY_UNIT = 200
 REVERSE_SPEED = 80
 
-ARDUINO_DEVICENAME = "/dev/ttyUSB1"
+ARDUINO_DEVICENAME = "/dev/ttyUSB2"
 ARDUINO_BAUDRATE = 115200
 
 
