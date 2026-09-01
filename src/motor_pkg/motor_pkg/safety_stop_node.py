@@ -22,7 +22,7 @@ from std_msgs.msg import Float32MultiArray
 
 from dynamixel_sdk import PortHandler, PacketHandler, GroupSyncWrite, COMM_SUCCESS
 
-DXL_DEVICENAME = "/dev/ttyUSB0"
+DXL_DEVICENAME = "/dev/ttyUSB1"
 DXL_BAUDRATE = 57600
 PROTOCOL_VERSION = 2.0
 
