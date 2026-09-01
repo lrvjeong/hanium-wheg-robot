@@ -140,7 +140,9 @@ class SafetyStopNode(Node):
         while rclpy.ok():
             try:
                 line = self.arduino.readline().decode(errors='ignore').strip()
-            except serial.SerialException:
+            except serial.SerialException as e:
+                self.get_logger().warn(f'아두이노 읽기 실패: {e}')
+                time.sleep(0.5)
                 continue
             if not line:
                 continue
