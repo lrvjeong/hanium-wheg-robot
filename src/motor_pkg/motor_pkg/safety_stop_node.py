@@ -30,6 +30,8 @@ DXL_ID_1 = 1
 DXL_ID_2 = 2
 DXL_IDS = [DXL_ID_1, DXL_ID_2]
 DIR_1, DIR_2 = +1, -1   # 좌우 모터가 반대로 장착돼 있어서 방향 미러링
+DIR_1, DIR_2 = +1, -1   # 좌우 모터가 반대로 장착돼 있어서 방향 미러링
+TRIM_1, TRIM_2 = 1.0, 1.0   # 좌우 속도 미세보정 (한쪽이 빠르면 그쪽 값을 줄임, 예: 0.95)
 
 ADDR_TORQUE_ENABLE = 64
 ADDR_OPERATING_MODE = 11
@@ -40,7 +42,7 @@ OPERATING_MODE_VELOCITY = 1
 MAX_VELOCITY_UNIT = 200
 REVERSE_SPEED = 80
 
-ARDUINO_DEVICENAME = "/dev/ttyUSB1"
+ARDUINO_DEVICENAME = "/dev/ttyUSB0"
 ARDUINO_BAUDRATE = 115200
 
 
@@ -89,17 +91,17 @@ class SafetyStopNode(Node):
             return None
 
     def dc_cmd_cb(self, msg: Float32MultiArray):
-        if self.tilt_active:
-            return
-        if len(msg.data) < 2:
-            return
-        left_speed, right_speed = msg.data[0], msg.data[1]
-        left_vel = int(left_speed * MAX_VELOCITY_UNIT)
-        right_vel = int(right_speed * MAX_VELOCITY_UNIT)
-        self.sync_write_velocity({
-            DXL_ID_1: DIR_1 * left_vel,
-            DXL_ID_2: DIR_2 * right_vel,
-        })
+    	if self.tilt_active:
+        	return
+    	if len(msg.data) < 2:
+        	return
+    	left_speed, right_speed = msg.data[0], msg.data[1]
+    	left_vel = int(left_speed * MAX_VELOCITY_UNIT * TRIM_1)
+    	right_vel = int(right_speed * MAX_VELOCITY_UNIT * TRIM_2)
+    	self.sync_write_velocity({
+        	DXL_ID_1: DIR_1 * left_vel,
+        	DXL_ID_2: DIR_2 * right_vel,
+    	})
 
     def servo_cmd_cb(self, msg: Float32MultiArray):
         if self.tilt_active:

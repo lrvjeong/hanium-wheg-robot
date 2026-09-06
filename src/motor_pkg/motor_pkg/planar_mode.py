@@ -19,7 +19,7 @@ from dynamixel_sdk import (
 )
 
 # ------------------- 사용자 설정 -------------------
-DEVICENAME = "/dev/ttyUSB0"
+DEVICENAME = "/dev/ttyUSB2"
 BAUDRATE = 57600
 PROTOCOL_VERSION = 2.0
 
@@ -36,8 +36,12 @@ TORQUE_ENABLE = 1
 TORQUE_DISABLE = 0
 
 OPERATING_MODE_VELOCITY = 1   # Velocity Control Mode
-GOAL_VELOCITY_1 = -60
-GOAL_VELOCITY_2 = 60
+
+# 목표 속도. XC430 기준 단위는 0.229 rev/min 당 1.
+# 값이 클수록 빨리 돕니다. 음수면 반대 방향.
+# 최대치는 약 265~330 부근 (모델/전압에 따라 다름) 이니 너무 크게 잡지 마세요.
+GOAL_VELOCITY_1 = 100
+GOAL_VELOCITY_2 = -100
 # ----------------------------------------------------
 
 
