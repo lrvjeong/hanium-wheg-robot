@@ -60,10 +60,10 @@ def generate_launch_description():
 
     lidar_node = launch_ros.actions.Node(
         package = 'cyglidar_d2_ros2',
-        executable = 'cyglidar_d2_publisher',
+cyglidar_d2        executable = 'cyglidar_d2_publisher',
         output = 'screen',
         parameters=[
-           {"port_number": "/dev/ttyUSB0"},
+           {"port_number": "/dev/ttyUSB1"},
            {"baud_rate": LaunchConfiguration("baud_rate")},
            {"frame_id": "laser_frame"},
            {"fixed_frame": "/map"},

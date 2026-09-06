@@ -50,13 +50,13 @@ def generate_launch_description():
         output='screen'
     )
 
-    # 모터/안전 통합 노드 (다이나믹셀 + 아두이노 서보/IMU 전담, 실제 하드웨어 제어)
-    safety_stop_node = Node(
+    # 모터 하드웨어 통합 노드 (다이나믹셀 + 아두이노 서보/IMU 전담, 실제 하드웨어 제어)
+    motor_driver_node = Node(
         package='motor_pkg',
-        executable='safety_stop_node',
-        name='safety_stop_node',
+        executable='motor_driver_node',
+        name='motor_driver_node',
         output='screen'
-    )
+)
 
     return LaunchDescription([
         cyglidar_launch,
@@ -64,5 +64,5 @@ def generate_launch_description():
         tof_node,
         mode_fsm_node,
         motor_interface_node,
-        safety_stop_node,        # 수정
+        motor_driver_node,        # 수정
     ])

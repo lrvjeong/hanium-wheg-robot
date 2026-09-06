@@ -1,25 +1,4 @@
 #!/usr/bin/env python3
-"""
-motor_pkg/safety_stop_node.py
-
-다이나믹셀(구동모터)과 아두이노(서보+IMU센서) 실물 제어를 전담하는
-하드웨어 드라이버 노드.
-
-    /motor/dc_cmd    구독 -> 다이나믹셀 속도 명령 (좌/우)
-    /motor/servo_cmd 구독 -> 아두이노에 "S:<angle>\n" 시리얼 명령
-    /imu/data        발행  -> 아두이노가 보내는 "PITCH:<deg>\n" 스트림을
-                              파싱해서 publish (WT901이 아두이노에 직결돼
-                              있어서, 이 노드가 이미 열어둔 시리얼 포트로
-                              같이 받아옴)
-
-전복 안전 판단(IMU pitch 25도 진입 / 15도 해제)은 mode_fsm_node가 하고,
-SAFETY_STOP 상태가 되면 motor_interface_node가 이 노드로 정지 명령
-(dc_cmd = 0)을 내려주는 식으로 처리함. 이 노드/아두이노는 독립적인 안전
-판단을 하지 않고, 센서 값 전달 + ROS로 내려온 명령 반영만 함.
-(예전 버전에 있던 아두이노 자체 전복 감지/대응(TILT_*) 로직은
-mode_fsm_node의 SAFETY_STOP과 중복이라 제거하고, 대신 아두이노가 pitch를
-계속 스트리밍하도록 바꿈 — src/arduino/leg_servo_imu_controller 참고.)
-"""
 
 import math
 import serial
@@ -30,7 +9,7 @@ from sensor_msgs.msg import Imu
 
 from dynamixel_sdk import PortHandler, PacketHandler, GroupSyncWrite, COMM_SUCCESS
 
-DXL_DEVICENAME = "/dev/ttyUSB0"
+DXL_DEVICENAME = "/dev/ttyUSB2"
 DXL_BAUDRATE = 57600
 PROTOCOL_VERSION = 2.0
 
@@ -51,13 +30,13 @@ OPERATING_MODE_VELOCITY = 1
 # motor_interface_node가 보내는 -1.0~1.0 속도값을 raw velocity로 환산하는 배율
 MAX_VELOCITY_UNIT = 200
 
-ARDUINO_DEVICENAME = "/dev/ttyUSB2"
+ARDUINO_DEVICENAME = "/dev/ttyUSB0"
 ARDUINO_BAUDRATE = 115200
 
 
-class SafetyStopNode(Node):
+class MotorDriverNode(Node):
     def __init__(self):
-        super().__init__('safety_stop_node')
+        super().__init__('motor_driver_node')
 
         self.dxl_port, self.dxl_packet = self.init_dynamixel()
         self.arduino = self.init_arduino()
@@ -201,7 +180,7 @@ class SafetyStopNode(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    node = SafetyStopNode()
+    node = MotorDriverNode()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:

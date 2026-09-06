@@ -9,6 +9,7 @@ class ModeFsmNode(Node):
     def __init__(self):
         super().__init__('mode_fsm_node')
         self.state = RobotMode.PLANAR
+
         self.stop_dist      = 0.10   # 10cm 이내 단차 인식 → 무조건 정지
         self.stop_hold_sec  = 1.5    # 정지 유지 시간(초)
 
@@ -34,7 +35,6 @@ class ModeFsmNode(Node):
 
     def terrain_cb(self, msg: TerrainInfo):
         prev = self.state
-
         if self.state == RobotMode.PLANAR:
             if msg.step_detected and msg.distance_to_step <= self.stop_dist:
                 self.state = RobotMode.STEP_STOP
@@ -43,11 +43,9 @@ class ModeFsmNode(Node):
                 self.get_logger().info(
                     f'단차 인식 (거리 {msg.distance_to_step*100:.1f}cm) → 정지, 높이 판별 대기'
                 )
-
         elif self.state == RobotMode.STEP_STOP:
             if msg.step_detected:
                 self.stop_height_samples.append(msg.step_height)
-
             elapsed = (self.get_clock().now() - self.stop_entered_time).nanoseconds / 1e9
             if elapsed >= self.stop_hold_sec:
                 if self.stop_height_samples:
@@ -66,9 +64,7 @@ class ModeFsmNode(Node):
                         self.state = RobotMode.BLOCKED
                 else:
                     self.state = RobotMode.PLANAR
-
                 self.stop_height_samples = []
-
         elif self.state in (
             RobotMode.HIGH_TORQUE,
             RobotMode.WHEG,
@@ -85,12 +81,10 @@ class ModeFsmNode(Node):
             self.get_logger().info(
                 f'상태 전환: {labels[prev]} → {labels[self.state]}'
             )
-
         self.publish_mode()
 
     def imu_cb(self, msg: Imu):
         pitch_deg = self.get_pitch_deg(msg.orientation)
-
         if abs(pitch_deg) > self.safety_enter_deg:
             if self.state != RobotMode.SAFETY_STOP:
                 self.get_logger().warn(
@@ -98,7 +92,6 @@ class ModeFsmNode(Node):
                 )
                 self.state = RobotMode.SAFETY_STOP
                 self.publish_mode()
-
         elif self.state == RobotMode.SAFETY_STOP and abs(pitch_deg) < self.safety_recover_deg:
             self.get_logger().info(
                 f'위험 해제 (pitch={pitch_deg:.1f}°) → PLANAR 복귀'
