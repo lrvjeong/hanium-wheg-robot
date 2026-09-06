@@ -9,17 +9,22 @@ class ModeFsmNode(Node):
     def __init__(self):
         super().__init__('mode_fsm_node')
         self.state = RobotMode.PLANAR
-
         self.stop_dist      = 0.30   # 30cm 이내 단차 인식 → 무조건 정지
         self.stop_hold_sec  = 1.5    # 정지 유지 시간(초)
 
         # 단차 판별 기준
         self.no_step_h      = 0.01   # 1cm 미만 → 단차로 안 침 (바닥 인식 오차)
         self.high_torque_h  = 0.03   # 1~3cm → 고토크
-        self.wheg_h          = 0.06   # 3~6cm → 휘그
-                                       # 6cm 이상 → 블락
+        self.wheg_h          = 0.08   # 3~8cm → 휘그
+                                       # 8cm 이상 → 블락
 
         self.stop_entered_time = None
+
+        # (수정) STEP_STOP으로 정지해있는 동안 들어오는 step_height를 계속 쌓아뒀다가,
+        # 1.5초가 다 됐을 때 "그 순간 도착한 메시지 하나"가 아니라 정지 구간 전체의
+        # 평균으로 모드를 판정하기 위한 버퍼. 노이즈 튄 값 한 프레임 때문에
+        # 엉뚱한 모드로 확정되는 걸 방지.
+        self.stop_height_samples = []
 
         self.create_subscription(TerrainInfo, '/terrain/info', self.terrain_cb, 10)
         self.create_subscription(Imu, '/imu/data', self.imu_cb, 10)
@@ -34,6 +39,7 @@ class ModeFsmNode(Node):
             if msg.step_detected and msg.distance_to_step <= self.stop_dist:
                 self.state = RobotMode.STEP_STOP
                 self.stop_entered_time = self.get_clock().now()
+                self.stop_height_samples = []  # (수정) STEP_STOP 진입 시 버퍼 초기화
                 self.get_logger().info(
                     f'단차 인식 (거리 {msg.distance_to_step*100:.1f}cm) → 정지, 높이 판별 대기'
                 )
@@ -41,18 +47,32 @@ class ModeFsmNode(Node):
         elif self.state == RobotMode.STEP_STOP:
             if not msg.step_detected:
                 self.state = RobotMode.PLANAR
+                self.stop_height_samples = []  # (수정) 취소된 경우도 버퍼 정리
             else:
+                # (수정) 정지해있는 동안 들어오는 높이값을 계속 수집
+                self.stop_height_samples.append(msg.step_height)
+
                 elapsed = (self.get_clock().now() - self.stop_entered_time).nanoseconds / 1e9
                 if elapsed >= self.stop_hold_sec:
-                    if msg.step_height < self.no_step_h:
+                    # (수정) 마지막 메시지 하나가 아니라, 정지 구간 동안 모은
+                    # 샘플들의 평균으로 판정 (노이즈에 더 강함)
+                    avg_height = sum(self.stop_height_samples) / len(self.stop_height_samples)
+                    self.get_logger().info(
+                        f'단차 높이 판정: 평균 {avg_height*100:.1f}cm '
+                        f'(샘플 {len(self.stop_height_samples)}개 기준)'
+                    )
+
+                    if avg_height < self.no_step_h:
                         # 1cm 미만 → 단차 아님, 그냥 평지로 취급
                         self.state = RobotMode.PLANAR
-                    elif msg.step_height < self.high_torque_h:
+                    elif avg_height < self.high_torque_h:
                         self.state = RobotMode.HIGH_TORQUE
-                    elif msg.step_height < self.wheg_h:
+                    elif avg_height < self.wheg_h:
                         self.state = RobotMode.WHEG
                     else:
                         self.state = RobotMode.BLOCKED
+
+                    self.stop_height_samples = []  # (수정) 판정 끝났으니 버퍼 정리
 
         elif self.state in (
             RobotMode.HIGH_TORQUE,
