@@ -9,21 +9,21 @@ class ModeFsmNode(Node):
     def __init__(self):
         super().__init__('mode_fsm_node')
         self.state = RobotMode.PLANAR
-        self.stop_dist      = 0.30   # 30cm 이내 단차 인식 → 무조건 정지
+        self.stop_dist      = 0.10   # 10cm 이내 단차 인식 → 무조건 정지
         self.stop_hold_sec  = 1.5    # 정지 유지 시간(초)
 
         # 단차 판별 기준
         self.no_step_h      = 0.01   # 1cm 미만 → 단차로 안 침 (바닥 인식 오차)
         self.high_torque_h  = 0.03   # 1~3cm → 고토크
-        self.wheg_h          = 0.06   # 3~6cm → 휘그
-                                       # 6cm 이상 → 블락
+        self.wheg_h          = 0.08   # 3~8cm → 휘그
+                                       # 8cm 이상 → 블락
+
+        # SAFETY_STOP 진입/해제 임계각 (히스테리시스: 25도에서 진입, 15도 밑으로
+        # 내려와야 해제 — 경계값 부근에서 상태가 튀는 것 방지)
+        self.safety_enter_deg  = 25.0
+        self.safety_recover_deg = 15.0
 
         self.stop_entered_time = None
-
-        # (수정) STEP_STOP으로 정지해있는 동안 들어오는 step_height를 계속 쌓아뒀다가,
-        # 1.5초가 다 됐을 때 "그 순간 도착한 메시지 하나"가 아니라 정지 구간 전체의
-        # 평균으로 모드를 판정하기 위한 버퍼. 노이즈 튄 값 한 프레임 때문에
-        # 엉뚱한 모드로 확정되는 걸 방지.
         self.stop_height_samples = []
 
         self.create_subscription(TerrainInfo, '/terrain/info', self.terrain_cb, 10)
@@ -39,17 +39,12 @@ class ModeFsmNode(Node):
             if msg.step_detected and msg.distance_to_step <= self.stop_dist:
                 self.state = RobotMode.STEP_STOP
                 self.stop_entered_time = self.get_clock().now()
-                self.stop_height_samples = []  # (수정) STEP_STOP 진입 시 버퍼 초기화
+                self.stop_height_samples = []
                 self.get_logger().info(
                     f'단차 인식 (거리 {msg.distance_to_step*100:.1f}cm) → 정지, 높이 판별 대기'
                 )
 
         elif self.state == RobotMode.STEP_STOP:
-            # (수정) 프레임 하나가 필터를 못 통과해서 step_detected=False로 튀어도
-            # 그 즉시 PLANAR로 되돌리지 않음. 그냥 그 프레임만 샘플에서 빼고
-            # 계속 정지 상태를 유지하다가, 시간이 다 되면 그때까지 모인
-            # 유효한 샘플들의 평균으로만 판정함. (일시적 노이즈 프레임 때문에
-            # 판정 자체가 무산되는 문제를 없앰)
             if msg.step_detected:
                 self.stop_height_samples.append(msg.step_height)
 
@@ -61,9 +56,7 @@ class ModeFsmNode(Node):
                         f'단차 높이 판정: 평균 {avg_height*100:.1f}cm '
                         f'(샘플 {len(self.stop_height_samples)}개 기준)'
                     )
-
                     if avg_height < self.no_step_h:
-                        # 1cm 미만 → 단차 아님, 그냥 평지로 취급
                         self.state = RobotMode.PLANAR
                     elif avg_height < self.high_torque_h:
                         self.state = RobotMode.HIGH_TORQUE
@@ -72,10 +65,9 @@ class ModeFsmNode(Node):
                     else:
                         self.state = RobotMode.BLOCKED
                 else:
-                    # 유효 샘플이 하나도 없으면(계속 미검출) 평지로 판단
                     self.state = RobotMode.PLANAR
 
-                self.stop_height_samples = []  # (수정) 판정 끝났으니 버퍼 정리
+                self.stop_height_samples = []
 
         elif self.state in (
             RobotMode.HIGH_TORQUE,
@@ -98,13 +90,22 @@ class ModeFsmNode(Node):
 
     def imu_cb(self, msg: Imu):
         pitch_deg = self.get_pitch_deg(msg.orientation)
-        if abs(pitch_deg) > 30.0:
+
+        if abs(pitch_deg) > self.safety_enter_deg:
             if self.state != RobotMode.SAFETY_STOP:
                 self.get_logger().warn(
                     f'전복 위험 감지 (pitch={pitch_deg:.1f}°) → SAFETY_STOP'
                 )
                 self.state = RobotMode.SAFETY_STOP
                 self.publish_mode()
+
+        elif self.state == RobotMode.SAFETY_STOP and abs(pitch_deg) < self.safety_recover_deg:
+            self.get_logger().info(
+                f'위험 해제 (pitch={pitch_deg:.1f}°) → PLANAR 복귀'
+            )
+            self.state = RobotMode.PLANAR
+            self.stop_height_samples = []
+            self.publish_mode()
 
     def get_pitch_deg(self, q):
         sinp = 2 * (q.w * q.y - q.z * q.x)
