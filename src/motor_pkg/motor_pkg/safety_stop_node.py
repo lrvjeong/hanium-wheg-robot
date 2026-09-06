@@ -22,7 +22,7 @@ from std_msgs.msg import Float32MultiArray
 
 from dynamixel_sdk import PortHandler, PacketHandler, GroupSyncWrite, COMM_SUCCESS
 
-DXL_DEVICENAME = "/dev/ttyUSB1"
+DXL_DEVICENAME = "/dev/ttyUSB0"
 DXL_BAUDRATE = 57600
 PROTOCOL_VERSION = 2.0
 
@@ -42,7 +42,7 @@ OPERATING_MODE_VELOCITY = 1
 MAX_VELOCITY_UNIT = 200
 REVERSE_SPEED = 80
 
-ARDUINO_DEVICENAME = "/dev/ttyUSB0"
+ARDUINO_DEVICENAME = "/dev/ttyUSB2"
 ARDUINO_BAUDRATE = 115200
 
 
@@ -142,7 +142,9 @@ class SafetyStopNode(Node):
         while rclpy.ok():
             try:
                 line = self.arduino.readline().decode(errors='ignore').strip()
-            except serial.SerialException:
+            except serial.SerialException as e:
+                self.get_logger().warn(f'아두이노 읽기 실패: {e}')
+                time.sleep(0.5)
                 continue
             if not line:
                 continue
