@@ -15,8 +15,8 @@ class ModeFsmNode(Node):
         # 단차 판별 기준
         self.no_step_h      = 0.01   # 1cm 미만 → 단차로 안 침 (바닥 인식 오차)
         self.high_torque_h  = 0.03   # 1~3cm → 고토크
-        self.wheg_h          = 0.08   # 3~8cm → 휘그
-                                       # 8cm 이상 → 블락
+        self.wheg_h          = 0.06   # 3~6cm → 휘그
+                                       # 6cm 이상 → 블락
 
         self.stop_entered_time = None
 
@@ -45,17 +45,17 @@ class ModeFsmNode(Node):
                 )
 
         elif self.state == RobotMode.STEP_STOP:
-            if not msg.step_detected:
-                self.state = RobotMode.PLANAR
-                self.stop_height_samples = []  # (수정) 취소된 경우도 버퍼 정리
-            else:
-                # (수정) 정지해있는 동안 들어오는 높이값을 계속 수집
+            # (수정) 프레임 하나가 필터를 못 통과해서 step_detected=False로 튀어도
+            # 그 즉시 PLANAR로 되돌리지 않음. 그냥 그 프레임만 샘플에서 빼고
+            # 계속 정지 상태를 유지하다가, 시간이 다 되면 그때까지 모인
+            # 유효한 샘플들의 평균으로만 판정함. (일시적 노이즈 프레임 때문에
+            # 판정 자체가 무산되는 문제를 없앰)
+            if msg.step_detected:
                 self.stop_height_samples.append(msg.step_height)
 
-                elapsed = (self.get_clock().now() - self.stop_entered_time).nanoseconds / 1e9
-                if elapsed >= self.stop_hold_sec:
-                    # (수정) 마지막 메시지 하나가 아니라, 정지 구간 동안 모은
-                    # 샘플들의 평균으로 판정 (노이즈에 더 강함)
+            elapsed = (self.get_clock().now() - self.stop_entered_time).nanoseconds / 1e9
+            if elapsed >= self.stop_hold_sec:
+                if self.stop_height_samples:
                     avg_height = sum(self.stop_height_samples) / len(self.stop_height_samples)
                     self.get_logger().info(
                         f'단차 높이 판정: 평균 {avg_height*100:.1f}cm '
@@ -71,8 +71,11 @@ class ModeFsmNode(Node):
                         self.state = RobotMode.WHEG
                     else:
                         self.state = RobotMode.BLOCKED
+                else:
+                    # 유효 샘플이 하나도 없으면(계속 미검출) 평지로 판단
+                    self.state = RobotMode.PLANAR
 
-                    self.stop_height_samples = []  # (수정) 판정 끝났으니 버퍼 정리
+                self.stop_height_samples = []  # (수정) 판정 끝났으니 버퍼 정리
 
         elif self.state in (
             RobotMode.HIGH_TORQUE,
