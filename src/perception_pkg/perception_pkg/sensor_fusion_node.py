@@ -13,10 +13,23 @@ class SensorFusionNode(Node):
 
         # ── 거리 경계 파라미터 ─────────────────────────────────
         self.lidar_reliable_min = 0.30   # 30cm 이상에서만 라이다 신뢰
-        self.lidar_height       = 0.05   # 라이다 장착 높이 (m)
-        self.detect_range       = 0.35    # 전방 감지 거리 (m)
+        self.detect_range       = 0.35    # 전방 감지 거리 (m, 지면 기준 수평거리)
         self.step_threshold     = 0.005   # 최소 단차 높이
         self.side_limit         = 0.04    # 좌우 범위 (±4cm)
+
+        # ── 라이다 장착 자세 (지면 기준) ───────────────────────
+        # 상판보다 위에 하향으로 기울여 장착: 높이 H, 하향 틸트각 θ
+        self.lidar_height   = 0.15   # 지면 ~ 라이다 렌즈까지 높이 (m)
+        self.lidar_tilt_deg = 20.0   # 정면 수평 기준 아래로 기울인 각도 (deg)
+        self._tilt_rad = math.radians(self.lidar_tilt_deg)
+        self._cos_t = math.cos(self._tilt_rad)
+        self._sin_t = math.sin(self._tilt_rad)
+
+        # 틸트 장착으로 좌표계를 새로 잡으면서, 예전 수평장착 가정용
+        # 경험적 보정값(+7cm)은 더 이상 안 맞으므로 0으로 초기화.
+        # 실측 단차(예: 3cm 블록)로 raw_height가 얼마나 나오는지 보고
+        # 필요하면 이 값으로 미세보정할 것.
+        self.height_calib_offset = 0.0
 
         # ToF 경계
         self.tof_near_limit     = 0.10   # 10cm 이하는 ToF만 사용
@@ -50,6 +63,10 @@ class SensorFusionNode(Node):
 
         self.get_logger().info('센서 퓨전 노드 시작')
         self.get_logger().info(
+            f'라이다 장착: 높이 {self.lidar_height*100:.0f}cm, '
+            f'하향 틸트 {self.lidar_tilt_deg:.0f}도'
+        )
+        self.get_logger().info(
             f'라이다 신뢰 구간: {self.lidar_reliable_min}m 이상'
         )
 
@@ -67,18 +84,38 @@ class SensorFusionNode(Node):
             )
         return self.smoothed_height
 
+    def to_ground_frame(self, p):
+        """
+        라이다 로컬 좌표(x_s: 라이다 정면, y_s: 좌우, z_s: 라이다 기준 위)를
+        하향 틸트각(self.lidar_tilt_deg)만큼 회전시켜 로봇/지면 기준
+        (x_ground: 지면 기준 수평 전방거리, y_ground: 좌우, z_ground: 지면 기준 절대높이)
+        로 변환한다.
+        """
+        x_s, y_s, z_s = p
+        x_ground = x_s * self._cos_t + z_s * self._sin_t
+        z_ground = (
+            self.lidar_height
+            - x_s * self._sin_t
+            + z_s * self._cos_t
+            + self.height_calib_offset
+        )
+        return x_ground, y_s, z_ground
+
     def scan3d_cb(self, msg: PointCloud2):
         terrain = TerrainInfo()
 
-        points = list(pc2.read_points(
+        raw_points = list(pc2.read_points(
             msg, field_names=('x', 'y', 'z'), skip_nans=True
         ))
 
-        if not points:
+        if not raw_points:
             terrain.step_detected = False
             self.smoothed_height = None   # 단차 없음 → 필터 초기화
             self.terrain_pub.publish(terrain)
             return
+
+        # 틸트 보정된 지면 기준 좌표로 변환 (x: 수평거리, y: 좌우, z: 절대높이)
+        points = [self.to_ground_frame(p) for p in raw_points]
 
         front_points = [
             p for p in points
@@ -113,8 +150,7 @@ class SensorFusionNode(Node):
 
         # [구간 2] 10~30cm → ToF 거리 + 라이다 높이 병행
         elif min_dist < self.lidar_reliable_min:
-            z_corrected = [p[2] + self.lidar_height for p in front_points]
-            step_z = [z for z in z_corrected if z >= self.step_threshold]
+            step_z = [p[2] for p in front_points if p[2] >= self.step_threshold]
 
             terrain.tof_active    = True
             terrain.tof_distance  = self.latest_tof_dist
@@ -123,7 +159,6 @@ class SensorFusionNode(Node):
                 step_z_sorted = sorted(step_z, reverse=True)
                 top_n = max(1, len(step_z_sorted) // 10)
                 raw_height = sum(step_z_sorted[:top_n]) / top_n
-                raw_height += 0.07
 
                 step_height = self.smooth_height(raw_height)
 
@@ -133,7 +168,7 @@ class SensorFusionNode(Node):
                 terrain.slope_deg        = float(self.latest_pitch)
                 self.get_logger().info(
                     f'[병행 모드] 거리(ToF): {self.latest_tof_dist*100:.1f}cm | '
-                    f'높이(라이다, 필터전): {raw_height*100:.1f}cm | '
+                    f'높이(필터전): {raw_height*100:.1f}cm | '
                     f'높이(필터후): {step_height*100:.1f}cm'
                 )
             else:
@@ -142,8 +177,7 @@ class SensorFusionNode(Node):
 
         # [구간 3] 30cm 이상 → 라이다만 사용
         else:
-            z_corrected = [p[2] + self.lidar_height for p in front_points]
-            step_z = [z for z in z_corrected if z >= self.step_threshold]
+            step_z = [p[2] for p in front_points if p[2] >= self.step_threshold]
 
             terrain.tof_active = False
 
@@ -151,7 +185,6 @@ class SensorFusionNode(Node):
                 step_z_sorted = sorted(step_z, reverse=True)
                 top_n = max(1, len(step_z_sorted) // 10)
                 raw_height = sum(step_z_sorted[:top_n]) / top_n
-                raw_height += 0.07
 
                 step_height = self.smooth_height(raw_height)
 
