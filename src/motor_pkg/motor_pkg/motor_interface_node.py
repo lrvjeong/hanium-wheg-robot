@@ -11,9 +11,17 @@ class MotorInterfaceNode(Node):
         # ── 속도/토크 파라미터 (실물 테스트 후 조정) ──────────────
         self.PLANAR_SPEED       = 0.5   # 평지 일반 주행
         self.HIGH_TORQUE_SPEED  = 0.9   # 1~3cm 단차 - 속도 업, 서보 제어 없음
-        self.WHEG_SPEED         = 0.8   # 3~6cm 단차 와다다 등반
+        self.WHEG_SPEED         = 0.8   # 3~8cm 단차 와다다 등반
         self.STOP_SPEED         = 0.0   # 정지
         self.REVERSE_SPEED      = -0.5  # 후진 (블락 회피, 실물 보고 조정)
+
+        # BLOCKED 회피 시퀀스: 후진 → 제자리 방향전환 → 정지
+        # (blocked_mode.py의 reverse→turn_one_wheel 시퀀스를 이 노드 안으로 이식)
+        self.REVERSE_DURATION_SEC = 2.0   # 후진 지속 시간(초), 실측 후 조정
+        self.TURN_DURATION_SEC    = 2.5   # 방향전환 지속 시간(초), 실측 후 조정
+        self.TURN_SPEED           = 0.6   # 방향전환 시 좌우 반대로 줄 속도 크기
+        self._blocked_reverse_timer = None
+        self._blocked_turn_timer = None
 
         # 서보 각도 (도 단위, 실물 보고 조정)
         self.WHEEL_MODE_ANGLE   = 0.0    # 바퀴 모드 (Wheg 완전 접힘)
@@ -45,6 +53,10 @@ class MotorInterfaceNode(Node):
         if msg.state != RobotMode.WHEG and self.wheg_hold_timer is not None:
             self.wheg_hold_timer.cancel()
             self.wheg_hold_timer = None
+
+        # BLOCKED 모드에서 빠져나가면(예: SAFETY_STOP이 끼어든 경우) 회피 시퀀스 중단
+        if msg.state != RobotMode.BLOCKED:
+            self._cancel_blocked_timers()
 
         labels = {
             0: 'PLANAR', 1: 'HIGH_TORQUE', 2: 'WHEG',
@@ -80,10 +92,10 @@ class MotorInterfaceNode(Node):
                 )
 
         elif msg.state == RobotMode.BLOCKED:
-            # c: 후진으로 회피
-            self.set_dc(self.REVERSE_SPEED)
+            # c: 후진 → 제자리 방향전환 순서로 회피 (blocked_mode.py 시퀀스 이식)
             self.set_servo(self.WHEEL_MODE_ANGLE)
-            self.get_logger().warn('단차 극복 불가 — 후진 회피')
+            self.get_logger().warn('단차 극복 불가 — 후진 후 방향전환 회피 시작')
+            self._start_blocked_avoid_sequence()
 
         elif msg.state == RobotMode.SAFETY_STOP:
             self.set_dc(self.STOP_SPEED)
@@ -93,11 +105,54 @@ class MotorInterfaceNode(Node):
     def _wheg_hold_cb(self):
         self.set_servo(self.LEG_MODE_ANGLE)
 
-    def set_dc(self, speed: float):
+    # ── BLOCKED 회피 시퀀스: 후진 → 방향전환 → 정지 ──────────────
+    def _start_blocked_avoid_sequence(self):
+        self._cancel_blocked_timers()  # 혹시 이전 시퀀스가 남아있으면 정리
+
+        self.get_logger().info(f'[회피] 후진 시작 ({self.REVERSE_DURATION_SEC}초)')
+        self.set_dc(self.REVERSE_SPEED)
+
+        self._blocked_reverse_timer = self.create_timer(
+            self.REVERSE_DURATION_SEC, self._blocked_start_turn
+        )
+
+    def _blocked_start_turn(self):
+        if self._blocked_reverse_timer is not None:
+            self._blocked_reverse_timer.cancel()
+            self._blocked_reverse_timer = None
+
+        self.get_logger().info(f'[회피] 방향전환 시작 ({self.TURN_DURATION_SEC}초)')
+        # 좌우를 반대 부호로 줘서 제자리 회전에 가깝게 방향 전환
+        self.set_dc(-self.TURN_SPEED, self.TURN_SPEED)
+
+        self._blocked_turn_timer = self.create_timer(
+            self.TURN_DURATION_SEC, self._blocked_finish
+        )
+
+    def _blocked_finish(self):
+        if self._blocked_turn_timer is not None:
+            self._blocked_turn_timer.cancel()
+            self._blocked_turn_timer = None
+
+        self.set_dc(self.STOP_SPEED)
+        self.get_logger().info('[회피] 완료 — 정지, 재주행 판단 대기')
+
+    def _cancel_blocked_timers(self):
+        if self._blocked_reverse_timer is not None:
+            self._blocked_reverse_timer.cancel()
+            self._blocked_reverse_timer = None
+        if self._blocked_turn_timer is not None:
+            self._blocked_turn_timer.cancel()
+            self._blocked_turn_timer = None
+
+    def set_dc(self, left_speed: float, right_speed: float = None):
+        """좌우 속도를 따로 줄 수 있도록 확장 (right_speed 생략 시 좌우 동일)"""
+        if right_speed is None:
+            right_speed = left_speed
         msg = Float32MultiArray()
-        msg.data = [speed, speed]
+        msg.data = [left_speed, right_speed]
         self.dc_pub.publish(msg)
-        self.get_logger().info(f'DC 모터: 좌={speed}, 우={speed}')
+        self.get_logger().info(f'DC 모터: 좌={left_speed}, 우={right_speed}')
 
     def set_servo(self, angle: float):
         msg = Float32MultiArray()
