@@ -103,8 +103,8 @@ class ModeFsmNode(Node):
 
         if prev != self.state:
             labels = {
-                0: 'PLANAR', 1: 'HIGH_TORQUE', 2: 'WHEG',
-                3: 'BLOCKED', 4: 'SAFETY_STOP', 5: 'STEP_STOP'
+                0: 'PLANAR', 1: 'STEP_STOP', 2: 'HIGH_TORQUE',
+                3: 'WHEG', 4: 'BLOCKED', 5: 'SAFETY_STOP'
             }
             self.get_logger().info(
                 f'상태 전환: {labels[prev]} → {labels[self.state]}'
