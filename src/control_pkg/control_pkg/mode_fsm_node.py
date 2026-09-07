@@ -12,6 +12,7 @@ class ModeFsmNode(Node):
         self.stop_dist      = 0.10   # 10cm 이내 단차 인식 → 무조건 정지
 
         self.declare_parameter('stop_hold_sec', 8.0)
+        self.stop_hold_sec = self.get_parameter('stop_hold_sec').get_parameter_value().double_value
 
         # 단차 판별 기준
         self.no_step_h      = 0.01   # 1cm 미만 → 단차로 안 침 (바닥 인식 오차)
