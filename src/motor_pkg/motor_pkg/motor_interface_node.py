@@ -76,8 +76,8 @@ class MotorInterfaceNode(Node):
             self._cancel_blocked_timers()
 
         labels = {
-            0: 'PLANAR', 1: 'HIGH_TORQUE', 2: 'WHEG',
-            3: 'BLOCKED', 4: 'SAFETY_STOP', 5: 'STEP_STOP'
+            0: 'PLANAR', 1: 'STEP_STOP', 2: 'HIGH_TORQUE',
+            3: 'WHEG', 4: 'BLOCKED', 5: 'SAFETY_STOP'
         }
         self.get_logger().info(
             f'모드 수신: {labels.get(msg.state, "UNKNOWN")}'
