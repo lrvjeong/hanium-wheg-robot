@@ -189,7 +189,10 @@ def _lidar_sites(front: float) -> str:
     각 광선의 방향은 LIDAR_MOUNT_TILT(아래로 기운 각도)를 중심으로
     수평/수직 화각 안에서 격자로 퍼짐."""
     lines = []
-    base_pos = (front + 0.002, 0, 0)  # CygLiDAR 실장 위치: 상판-하판 사이 중앙(z=0), 전방 정중앙
+    # 실측: 라이다는 상판 위쪽 표면(z=ROD_HEIGHT/2+PLATE_THICK)에, 좌우(Y) 중앙,
+    # 진행방향 앞쪽(X)에 장착됨 — 예전엔 상판-하판 사이 중앙(z=0)으로 가정했었음
+    lidar_z = ROD_HEIGHT / 2 + PLATE_THICK
+    base_pos = (front + 0.002, 0, lidar_z)
     for r in range(LIDAR_ROWS):
         v = -LIDAR_FOV_V / 2 + LIDAR_FOV_V * (r / max(LIDAR_ROWS - 1, 1))
         pitch = LIDAR_MOUNT_TILT + v  # 아래로 기울수록 +
@@ -271,22 +274,18 @@ def build_xml(step_h: float = STEP_H) -> str:
       <!-- 상판 2장(좌우 이어붙임) + 하판 2장(좌우 이어붙임) + 기둥 8개(판 세트당 4개)
            로 구성된 실제 샷시 구조. z=0을 상판-하판 사이 정중앙으로 둠. -->
 {_chassis_plates_and_rods()}
-      <!-- CygLiDAR (37.4 x 37.4 x 27mm) — 상판/하판 사이 중앙, 전방 정중앙 -->
+      <!-- CygLiDAR (37.4 x 37.4 x 27mm) — 실측: 상판 위쪽 표면, 좌우 중앙, 전방 -->
       <geom name="cyglidar_box" type="box"
             size="{_f(LIDAR_BOX[0]/2, LIDAR_BOX[1]/2, LIDAR_BOX[2]/2)}"
-            pos="{_f(front - LIDAR_BOX[0]/2 - 0.005, 0, 0)}"
+            pos="{_f(front - LIDAR_BOX[0]/2 - 0.005, 0, ROD_HEIGHT/2 + PLATE_THICK + LIDAR_BOX[2]/2)}"
             mass="0.03" rgba="0.15 0.15 0.15 1"/>
 
       <!-- 꼬리: 실제 STL 평판(160mm 폭 x 200mm 길이 x 5mm 두께). 하판 후방 중앙에 장착. -->
       <geom name="tail" type="mesh" mesh="tail_plate"
             friction="0.15 0.005 0.0001" rgba="0.3 0.3 0.3 1"/>
 
-      <!-- IMU 2개: 양쪽 바퀴 축 중심에 각각 장착 (차체에 고정, 바퀴 자체가 아님 —
-           베어링을 통해 축 자체는 회전하지 않으므로 차체 프레임의 site로 배치).
-           imu_l이 기존 코드 호환용 기본 센서, imu_r은 예비/이중화용으로 추가만 해둠
-           (둘 다 같은 강체(차체)에 고정돼 있어 자세값 자체는 imu_l과 동일하게 나옴). -->
-      <site name="imu_l" pos="{_f(WHEEL_X, WHEEL_Y, 0)}" size="0.008" rgba="1 1 0 0.5"/>
-      <site name="imu_r" pos="{_f(WHEEL_X, -WHEEL_Y, 0)}" size="0.008" rgba="1 0.6 0 0.5"/>
+      <!-- IMU: 실측 위치대로 라이다 바로 뒤, 상판 위쪽 표면, 좌우(Y) 중앙 장착 -->
+      <site name="imu_l" pos="{_f(front - 0.03, 0, ROD_HEIGHT/2 + PLATE_THICK)}" size="0.008" rgba="1 1 0 0.5"/>
 {_lidar_sites(front)}
 
       <!-- 로봇을 따라다니는 카메라 (뷰어에서 [ ] 키로 전환) -->
@@ -327,9 +326,6 @@ def build_xml(step_h: float = STEP_H) -> str:
     <gyro          name="imu_gyro" site="imu_l"/>
     <accelerometer name="imu_acc"  site="imu_l"/>
     <framequat     name="imu_quat" objtype="site" objname="imu_l"/>
-    <gyro          name="imu_r_gyro" site="imu_r"/>
-    <accelerometer name="imu_r_acc"  site="imu_r"/>
-    <framequat     name="imu_r_quat" objtype="site" objname="imu_r"/>
   </sensor>
 
   <keyframe>

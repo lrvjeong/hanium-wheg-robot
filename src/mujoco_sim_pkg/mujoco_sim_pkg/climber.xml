@@ -45,47 +45,44 @@
       <geom name="plate_bottom_r" type="box" size="0.0367 0.0688 0.0045" pos="0.0000 -0.0688 -0.0245" mass="0.400" rgba="0.55 0.58 0.62 1"/>
       <geom name="rod_r_f" type="cylinder" size="0.0040 0.0200" pos="0.0250 -0.0688 0.0000" mass="0.100" rgba="0.3 0.3 0.32 1"/>
       <geom name="rod_r_b" type="cylinder" size="0.0040 0.0200" pos="-0.0250 -0.0688 0.0000" mass="0.100" rgba="0.3 0.3 0.32 1"/>
-      <!-- CygLiDAR (37.4 x 37.4 x 27mm) — 상판/하판 사이 중앙, 전방 정중앙 -->
+      <!-- CygLiDAR (37.4 x 37.4 x 27mm) — 실측: 상판 위쪽 표면, 좌우 중앙, 전방 -->
       <geom name="cyglidar_box" type="box"
             size="0.0187 0.0187 0.0135"
-            pos="0.0130 0.0000 0.0000"
+            pos="0.0130 0.0000 0.0425"
             mass="0.03" rgba="0.15 0.15 0.15 1"/>
 
       <!-- 꼬리: 실제 STL 평판(160mm 폭 x 200mm 길이 x 5mm 두께). 하판 후방 중앙에 장착. -->
       <geom name="tail" type="mesh" mesh="tail_plate"
             friction="0.15 0.005 0.0001" rgba="0.3 0.3 0.3 1"/>
 
-      <!-- IMU 2개: 양쪽 바퀴 축 중심에 각각 장착 (차체에 고정, 바퀴 자체가 아님 —
-           베어링을 통해 축 자체는 회전하지 않으므로 차체 프레임의 site로 배치).
-           imu_l이 기존 코드 호환용 기본 센서, imu_r은 예비/이중화용으로 추가만 해둠
-           (둘 다 같은 강체(차체)에 고정돼 있어 자세값 자체는 imu_l과 동일하게 나옴). -->
-      <site name="imu_l" pos="0.0240 0.1406 0.0000" size="0.008" rgba="1 1 0 0.5"/>
-      <site name="imu_r" pos="0.0240 -0.1406 0.0000" size="0.008" rgba="1 0.6 0 0.5"/>
-      <site name="lidar_0_0" pos="0.0387 0.0000 0.0000" zaxis="0.8652 -0.4995 -0.0436" size="0.005" rgba="0 1 1 0.35"/>
-      <site name="lidar_0_1" pos="0.0387 0.0000 0.0000" zaxis="0.9650 -0.2586 -0.0436" size="0.005" rgba="0 1 1 0.35"/>
-      <site name="lidar_0_2" pos="0.0387 0.0000 0.0000" zaxis="0.9990 0.0000 -0.0436" size="0.005" rgba="0 1 1 0.35"/>
-      <site name="lidar_0_3" pos="0.0387 0.0000 0.0000" zaxis="0.9650 0.2586 -0.0436" size="0.005" rgba="0 1 1 0.35"/>
-      <site name="lidar_0_4" pos="0.0387 0.0000 0.0000" zaxis="0.8652 0.4995 -0.0436" size="0.005" rgba="0 1 1 0.35"/>
-      <site name="lidar_1_0" pos="0.0387 0.0000 0.0000" zaxis="0.8412 -0.4857 -0.2377" size="0.005" rgba="0 1 1 0.35"/>
-      <site name="lidar_1_1" pos="0.0387 0.0000 0.0000" zaxis="0.9382 -0.2514 -0.2377" size="0.005" rgba="0 1 1 0.35"/>
-      <site name="lidar_1_2" pos="0.0387 0.0000 0.0000" zaxis="0.9713 0.0000 -0.2377" size="0.005" rgba="0 1 1 0.35"/>
-      <site name="lidar_1_3" pos="0.0387 0.0000 0.0000" zaxis="0.9382 0.2514 -0.2377" size="0.005" rgba="0 1 1 0.35"/>
-      <site name="lidar_1_4" pos="0.0387 0.0000 0.0000" zaxis="0.8412 0.4857 -0.2377" size="0.005" rgba="0 1 1 0.35"/>
-      <site name="lidar_2_0" pos="0.0387 0.0000 0.0000" zaxis="0.7849 -0.4532 -0.4226" size="0.005" rgba="0 1 1 0.35"/>
-      <site name="lidar_2_1" pos="0.0387 0.0000 0.0000" zaxis="0.8754 -0.2346 -0.4226" size="0.005" rgba="0 1 1 0.35"/>
-      <site name="lidar_2_2" pos="0.0387 0.0000 0.0000" zaxis="0.9063 0.0000 -0.4226" size="0.005" rgba="0 1 1 0.35"/>
-      <site name="lidar_2_3" pos="0.0387 0.0000 0.0000" zaxis="0.8754 0.2346 -0.4226" size="0.005" rgba="0 1 1 0.35"/>
-      <site name="lidar_2_4" pos="0.0387 0.0000 0.0000" zaxis="0.7849 0.4532 -0.4226" size="0.005" rgba="0 1 1 0.35"/>
-      <site name="lidar_3_0" pos="0.0387 0.0000 0.0000" zaxis="0.6984 -0.4032 -0.5913" size="0.005" rgba="0 1 1 0.35"/>
-      <site name="lidar_3_1" pos="0.0387 0.0000 0.0000" zaxis="0.7790 -0.2087 -0.5913" size="0.005" rgba="0 1 1 0.35"/>
-      <site name="lidar_3_2" pos="0.0387 0.0000 0.0000" zaxis="0.8064 0.0000 -0.5913" size="0.005" rgba="0 1 1 0.35"/>
-      <site name="lidar_3_3" pos="0.0387 0.0000 0.0000" zaxis="0.7790 0.2087 -0.5913" size="0.005" rgba="0 1 1 0.35"/>
-      <site name="lidar_3_4" pos="0.0387 0.0000 0.0000" zaxis="0.6984 0.4032 -0.5913" size="0.005" rgba="0 1 1 0.35"/>
-      <site name="lidar_4_0" pos="0.0387 0.0000 0.0000" zaxis="0.5851 -0.3378 -0.7373" size="0.005" rgba="0 1 1 0.35"/>
-      <site name="lidar_4_1" pos="0.0387 0.0000 0.0000" zaxis="0.6526 -0.1749 -0.7373" size="0.005" rgba="0 1 1 0.35"/>
-      <site name="lidar_4_2" pos="0.0387 0.0000 0.0000" zaxis="0.6756 0.0000 -0.7373" size="0.005" rgba="0 1 1 0.35"/>
-      <site name="lidar_4_3" pos="0.0387 0.0000 0.0000" zaxis="0.6526 0.1749 -0.7373" size="0.005" rgba="0 1 1 0.35"/>
-      <site name="lidar_4_4" pos="0.0387 0.0000 0.0000" zaxis="0.5851 0.3378 -0.7373" size="0.005" rgba="0 1 1 0.35"/>
+      <!-- IMU: 실측 위치대로 라이다 바로 뒤, 상판 위쪽 표면, 좌우(Y) 중앙 장착 -->
+      <site name="imu_l" pos="0.0067 0.0000 0.0290" size="0.008" rgba="1 1 0 0.5"/>
+      <site name="lidar_0_0" pos="0.0387 0.0000 0.0290" zaxis="0.8652 -0.4995 -0.0436" size="0.005" rgba="0 1 1 0.35"/>
+      <site name="lidar_0_1" pos="0.0387 0.0000 0.0290" zaxis="0.9650 -0.2586 -0.0436" size="0.005" rgba="0 1 1 0.35"/>
+      <site name="lidar_0_2" pos="0.0387 0.0000 0.0290" zaxis="0.9990 0.0000 -0.0436" size="0.005" rgba="0 1 1 0.35"/>
+      <site name="lidar_0_3" pos="0.0387 0.0000 0.0290" zaxis="0.9650 0.2586 -0.0436" size="0.005" rgba="0 1 1 0.35"/>
+      <site name="lidar_0_4" pos="0.0387 0.0000 0.0290" zaxis="0.8652 0.4995 -0.0436" size="0.005" rgba="0 1 1 0.35"/>
+      <site name="lidar_1_0" pos="0.0387 0.0000 0.0290" zaxis="0.8412 -0.4857 -0.2377" size="0.005" rgba="0 1 1 0.35"/>
+      <site name="lidar_1_1" pos="0.0387 0.0000 0.0290" zaxis="0.9382 -0.2514 -0.2377" size="0.005" rgba="0 1 1 0.35"/>
+      <site name="lidar_1_2" pos="0.0387 0.0000 0.0290" zaxis="0.9713 0.0000 -0.2377" size="0.005" rgba="0 1 1 0.35"/>
+      <site name="lidar_1_3" pos="0.0387 0.0000 0.0290" zaxis="0.9382 0.2514 -0.2377" size="0.005" rgba="0 1 1 0.35"/>
+      <site name="lidar_1_4" pos="0.0387 0.0000 0.0290" zaxis="0.8412 0.4857 -0.2377" size="0.005" rgba="0 1 1 0.35"/>
+      <site name="lidar_2_0" pos="0.0387 0.0000 0.0290" zaxis="0.7849 -0.4532 -0.4226" size="0.005" rgba="0 1 1 0.35"/>
+      <site name="lidar_2_1" pos="0.0387 0.0000 0.0290" zaxis="0.8754 -0.2346 -0.4226" size="0.005" rgba="0 1 1 0.35"/>
+      <site name="lidar_2_2" pos="0.0387 0.0000 0.0290" zaxis="0.9063 0.0000 -0.4226" size="0.005" rgba="0 1 1 0.35"/>
+      <site name="lidar_2_3" pos="0.0387 0.0000 0.0290" zaxis="0.8754 0.2346 -0.4226" size="0.005" rgba="0 1 1 0.35"/>
+      <site name="lidar_2_4" pos="0.0387 0.0000 0.0290" zaxis="0.7849 0.4532 -0.4226" size="0.005" rgba="0 1 1 0.35"/>
+      <site name="lidar_3_0" pos="0.0387 0.0000 0.0290" zaxis="0.6984 -0.4032 -0.5913" size="0.005" rgba="0 1 1 0.35"/>
+      <site name="lidar_3_1" pos="0.0387 0.0000 0.0290" zaxis="0.7790 -0.2087 -0.5913" size="0.005" rgba="0 1 1 0.35"/>
+      <site name="lidar_3_2" pos="0.0387 0.0000 0.0290" zaxis="0.8064 0.0000 -0.5913" size="0.005" rgba="0 1 1 0.35"/>
+      <site name="lidar_3_3" pos="0.0387 0.0000 0.0290" zaxis="0.7790 0.2087 -0.5913" size="0.005" rgba="0 1 1 0.35"/>
+      <site name="lidar_3_4" pos="0.0387 0.0000 0.0290" zaxis="0.6984 0.4032 -0.5913" size="0.005" rgba="0 1 1 0.35"/>
+      <site name="lidar_4_0" pos="0.0387 0.0000 0.0290" zaxis="0.5851 -0.3378 -0.7373" size="0.005" rgba="0 1 1 0.35"/>
+      <site name="lidar_4_1" pos="0.0387 0.0000 0.0290" zaxis="0.6526 -0.1749 -0.7373" size="0.005" rgba="0 1 1 0.35"/>
+      <site name="lidar_4_2" pos="0.0387 0.0000 0.0290" zaxis="0.6756 0.0000 -0.7373" size="0.005" rgba="0 1 1 0.35"/>
+      <site name="lidar_4_3" pos="0.0387 0.0000 0.0290" zaxis="0.6526 0.1749 -0.7373" size="0.005" rgba="0 1 1 0.35"/>
+      <site name="lidar_4_4" pos="0.0387 0.0000 0.0290" zaxis="0.5851 0.3378 -0.7373" size="0.005" rgba="0 1 1 0.35"/>
+      <site name="tof_0" pos="0.0387 0.0000 0.0290" zaxis="1 0 0" size="0.005" rgba="1 1 0 0.35"/>
 
       <!-- 로봇을 따라다니는 카메라 (뷰어에서 [ ] 키로 전환) -->
       <camera name="follow" mode="trackcom" pos="0 -2.2 0.75"
@@ -193,12 +190,10 @@
     <rangefinder name="lidar_4_2" site="lidar_4_2" cutoff="2.5"/>
     <rangefinder name="lidar_4_3" site="lidar_4_3" cutoff="2.5"/>
     <rangefinder name="lidar_4_4" site="lidar_4_4" cutoff="2.5"/>
+    <rangefinder name="tof_0" site="tof_0" cutoff="0.15"/>
     <gyro          name="imu_gyro" site="imu_l"/>
     <accelerometer name="imu_acc"  site="imu_l"/>
     <framequat     name="imu_quat" objtype="site" objname="imu_l"/>
-    <gyro          name="imu_r_gyro" site="imu_r"/>
-    <accelerometer name="imu_r_acc"  site="imu_r"/>
-    <framequat     name="imu_r_quat" objtype="site" objname="imu_r"/>
   </sensor>
 
   <keyframe>

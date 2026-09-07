@@ -54,6 +54,7 @@ from climber_scene import (
     STEP_D, STAIR_X0, LEG_MAX_ANGLE,
     LIDAR_ROWS, LIDAR_COLS, LIDAR_MIN_RANGE, LIDAR_MAX_RANGE,
     LIDAR_FOV_H, LIDAR_FOV_V, LIDAR_MOUNT_TILT, START_Z,
+    ROD_HEIGHT, PLATE_THICK,
 )
 
 # ===== 튜닝 상수 =====
@@ -173,7 +174,7 @@ def _lidar_scan(data):
 # 차체(로봇 기준) 프레임으로 정의되어 있어서(climber_scene.py의 _lidar_sites),
 # 별도 좌표변환 없이 원점+거리*방향으로 바로 (x,y,z) 포인트를 얻을 수 있음.
 LIDAR_RELIABLE_MIN = 0.30   # 실측 sensor_fusion_node.py와 동일
-LIDAR_HEIGHT = 0.05          # 실측과 동일 (라이다 장착 높이)
+LIDAR_HEIGHT = ROD_HEIGHT / 2 + PLATE_THICK + START_Z  # 실측: 상판 위쪽 표면 높이로 이동(약 0.079m)
 DETECT_RANGE = 0.35          # 전방 감지 거리
 STEP_THRESHOLD = 0.005       # 최소 단차 높이로 인정하는 하한
 SIDE_LIMIT = 0.04            # 좌우 범위
