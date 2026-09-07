@@ -9,10 +9,9 @@ class ModeFsmNode(Node):
     def __init__(self):
         super().__init__('mode_fsm_node')
         self.state = RobotMode.PLANAR
-        self.stop_dist      = 0.30   # 30cm 이내 단차 인식 → 무조건 정지
+        self.stop_dist      = 0.10   # 10cm 이내 단차 인식 → 무조건 정지
 
-        self.declare_parameter('stop_hold_sec', 15)
-        self.stop_hold_sec = self.get_parameter('stop_hold_sec').get_parameter_value().double_value
+        self.declare_parameter('stop_hold_sec', 8.0)
 
         # 단차 판별 기준
         self.no_step_h      = 0.01   # 1cm 미만 → 단차로 안 침 (바닥 인식 오차)
@@ -44,6 +43,8 @@ class ModeFsmNode(Node):
         # 오판할 수 있음).
         self.stable_pitch_deg = 5.0     # 이 각도 이내면 "수평/안정화"로 간주
         self.latest_pitch_deg = 0.0
+        self.safety_clear_hold_sec = 1.0
+        self.safety_clear_start_time = None
 
         self.create_subscription(TerrainInfo, '/terrain/info', self.terrain_cb, 10)
         self.create_subscription(Imu, '/imu/data', self.imu_cb, 10)
@@ -137,16 +138,26 @@ class ModeFsmNode(Node):
 
     def imu_cb(self, msg: Imu):
         pitch_deg = self.get_pitch_deg(msg.orientation)
-        # (추가) climbing -> PLANAR 복귀 판단(terrain_cb)에서 쓸 수 있게
-        # 매번 최신 pitch를 저장해둠. 원래는 여기서 전복 감지에만 쓰고 버려졌음.
         self.latest_pitch_deg = pitch_deg
 
-        if abs(pitch_deg) > 30.0:
+        if abs(pitch_deg) > 25.0:
+            self.safety_clear_start_time = None  # 위험 지속 중이면 복귀타이머 리셋
             if self.state != RobotMode.SAFETY_STOP:
                 self.get_logger().warn(
                     f'전복 위험 감지 (pitch={pitch_deg:.1f}°) → SAFETY_STOP'
                 )
                 self.state = RobotMode.SAFETY_STOP
+                self.publish_mode()
+        elif self.state == RobotMode.SAFETY_STOP and abs(pitch_deg) < self.stable_pitch_deg:
+            if self.safety_clear_start_time is None:
+                self.safety_clear_start_time = self.get_clock().now()
+            elapsed = (self.get_clock().now() - self.safety_clear_start_time).nanoseconds / 1e9
+            if elapsed >= self.safety_clear_hold_sec:
+                self.get_logger().info(
+                    f'위험 해제 (pitch={pitch_deg:.1f}°) → PLANAR 복귀'
+                )
+                self.state = RobotMode.PLANAR
+                self.safety_clear_start_time = None
                 self.publish_mode()
 
     def get_pitch_deg(self, q):
